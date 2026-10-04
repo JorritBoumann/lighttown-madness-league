@@ -7,7 +7,7 @@ import { Ball } from './physics/ball';
 import { Car } from './physics/car';
 import { BoostPads } from './physics/boostPads';
 import { CarBallInteraction } from './physics/carBall';
-import { Keyboard } from './input/keyboard';
+import { Controls } from './input/controls';
 import { emptyInput, type CarInput } from './input/types';
 import { Bot, type BotRole } from './ai/bot';
 import { createRenderer, buildArenaMesh, disposeArenaMesh, type Renderer } from './render/scene';
@@ -82,7 +82,7 @@ export class Game {
   private readonly padVisuals: PadVisuals;
   private readonly ballInterp: TransformInterpolator;
 
-  private readonly keyboard: Keyboard;
+  private readonly controls: Controls;
   private readonly hud: Hud;
   private readonly matchHud: MatchHud;
   private readonly runHud: RunHud;
@@ -104,6 +104,8 @@ export class Game {
   private lastCountdownBeep = -1;
   /** Tracks supersonic, so the whoosh fires on crossing rather than per frame. */
   private wasSupersonic = false;
+  /** What the title screen last said about a pad, so it can be refreshed. */
+  private titleShowedPad = false;
   /** Round modifiers. Reverted and re-applied every round. */
   private readonly roundOverrides = new ConfigOverrides();
   /**
@@ -138,7 +140,7 @@ export class Game {
 
     this.addCar(0, 0, null);
 
-    this.keyboard = new Keyboard();
+    this.controls = new Controls();
     this.hud = new Hud(ui);
     this.matchHud = new MatchHud(ui);
     this.runHud = new RunHud(ui);
@@ -151,7 +153,10 @@ export class Game {
     // The game opens on the title screen rather than mid-round: a run should
     // start because the player asked for one.
     this.applyRound(buildRound(1, Math.random));
-    this.shell.showTitle(this.run.best, this.sound.muted);
+    // One poll before the title screen is drawn, so a pad that is already
+    // connected is reported as such instead of only after the first frame.
+    this.controls.poll();
+    this.shell.showTitle(this.run.best, this.sound.muted, this.controls.padConnected);
     this.syncHudVisibility();
     this.chase.snapTo(this.player.car.position, this.player.car.forward());
 
@@ -363,12 +368,12 @@ export class Game {
       } else {
         entry.car.input = this.inputOverride
           ? { ...emptyInput(), ...this.inputOverride }
-          : this.keyboard.read();
+          : this.controls.read();
       }
     }
     if (!driving && !this.inputOverride) {
       // Keeps the jump latch from banking a press for after the countdown.
-      this.keyboard.read();
+      this.controls.read();
     }
 
     const frozen =
@@ -447,6 +452,10 @@ export class Game {
   // --- rendering ---------------------------------------------------------
 
   private renderFrame(dt: number, alpha: number): void {
+    // Gamepads are polled, not pushed: the browser hands out snapshots, so a
+    // fresh read is needed every frame before anything asks for input.
+    this.controls.poll();
+
     for (const entry of this.entries) {
       entry.interp.apply(alpha);
       const boosting = entry.car.input.boost && entry.car.boost > 0;
@@ -475,37 +484,44 @@ export class Game {
     );
 
     this.handleHotkeys();
+    this.hud.setDevice(this.controls.device);
     this.hud.update(player.car, this.chase.ballCam);
     this.matchHud.update(this.match, dt);
     this.runHud.update(this.run, dt);
-    this.keyboard.endFrame();
+    this.controls.endFrame();
 
     this.render.renderer.render(this.render.scene, this.render.camera);
   }
 
   private handleHotkeys(): void {
-    // Any keypress is a gesture, which is what an AudioContext needs.
-    if (this.keyboard.anyPressed) this.sound.unlock();
+    // Any input at all is a gesture, which is what an AudioContext needs.
+    if (this.controls.anyPressed) this.sound.unlock();
 
     if (this.shell.visible) {
+      // A pad connected while the title screen is up should show there without
+      // needing the screen to be reopened.
+      if (this.screen === 'title' && this.controls.padConnected !== this.titleShowedPad) {
+        this.titleShowedPad = this.controls.padConnected;
+        this.shell.showTitle(this.run.best, this.sound.muted, this.titleShowedPad);
+      }
       this.handleMenuKeys();
       return;
     }
 
-    if (this.keyboard.wasPressed('Escape')) {
+    if (this.controls.pressed('pause')) {
       this.pause();
       return;
     }
-    if (this.keyboard.wasPressed('KeyT')) this.chase.toggleBallCam();
-    if (this.keyboard.wasPressed('KeyP')) this.panel.toggle();
-    if (this.keyboard.wasPressed('KeyM')) this.sound.toggleMute();
-    if (this.keyboard.wasPressed('KeyB')) this.ball.reset();
+    if (this.controls.pressed('ballCam')) this.chase.toggleBallCam();
+    if (this.controls.pressed('tuning')) this.panel.toggle();
+    if (this.controls.pressed('mute')) this.sound.toggleMute();
+    if (this.controls.pressed('resetBall')) this.ball.reset();
 
     // Between rounds, 1 to 3 take an upgrade. The run waits rather than being
     // timed out: the pick is the player's, and nothing is lost by waiting.
     if (!this.freePlay && this.run.phase === 'between') {
       for (let i = 0; i < 3; i++) {
-        if (this.keyboard.wasPressed(`Digit${i + 1}`)) {
+        if (this.controls.pressed(`pick${i + 1}` as 'pick1' | 'pick2' | 'pick3')) {
           this.pickUpgrade(i);
           break;
         }
@@ -516,17 +532,23 @@ export class Game {
   // --- screens -----------------------------------------------------------
 
   private handleMenuKeys(): void {
-    if (this.keyboard.wasPressed('ArrowUp')) {
+    if (this.controls.pressed('menuUp')) {
       this.shell.move(-1);
       this.sound.menuMove();
     }
-    if (this.keyboard.wasPressed('ArrowDown')) {
+    if (this.controls.pressed('menuDown')) {
       this.shell.move(1);
       this.sound.menuMove();
     }
-    for (let i = 1; i <= 4; i++) {
-      if (this.keyboard.wasPressed(`Digit${i}`)) {
-        const id = this.shell.pick(i);
+    const picks: readonly ('pick1' | 'pick2' | 'pick3' | 'pick4')[] = [
+      'pick1',
+      'pick2',
+      'pick3',
+      'pick4',
+    ];
+    for (const [i, action] of picks.entries()) {
+      if (this.controls.pressed(action)) {
+        const id = this.shell.pick(i + 1);
         if (id) {
           this.sound.menuSelect();
           this.choose(id);
@@ -534,7 +556,7 @@ export class Game {
         return;
       }
     }
-    if (this.keyboard.wasPressed('Enter') || this.keyboard.wasPressed('Space')) {
+    if (this.controls.pressed('menuSelect')) {
       const id = this.shell.selectedId;
       if (id) {
         this.sound.menuSelect();
@@ -542,8 +564,8 @@ export class Game {
       }
       return;
     }
-    // Esc resumes from the pause menu, which is where it was pressed.
-    if (this.keyboard.wasPressed('Escape') && this.screen === 'paused') this.choose('resume');
+    // Pause resumes from the pause menu, which is where it was triggered.
+    if (this.controls.pressed('pause') && this.screen === 'paused') this.choose('resume');
   }
 
   /** Acts on a menu item. The shell reports the choice; this one makes it. */
@@ -570,7 +592,9 @@ export class Game {
       case 'mute': {
         const muted = this.sound.toggleMute();
         // Redraw the screen so the label matches.
-        if (this.screen === 'title') this.shell.showTitle(this.run.best, muted);
+        if (this.screen === 'title') {
+          this.shell.showTitle(this.run.best, muted, this.controls.padConnected);
+        }
         else if (this.screen === 'paused') this.shell.showPause(this.roundLabel, muted);
         return;
       }
@@ -631,7 +655,7 @@ export class Game {
     this.freePlay = false;
     this.sound.setBoost(0);
     this.particles.clear();
-    this.shell.showTitle(this.run.best, this.sound.muted);
+    this.shell.showTitle(this.run.best, this.sound.muted, this.controls.padConnected);
     this.syncHudVisibility();
   }
 
@@ -781,6 +805,7 @@ export class Game {
     readonly runOverrides: ConfigOverrides;
     readonly screen: Screen;
     readonly freePlay: boolean;
+    readonly controls: Controls;
   } {
     // Getters rather than a snapshot: the match is replaced on every restart,
     // and a held reference to the old one silently reports stale state.
@@ -824,6 +849,9 @@ export class Game {
       },
       get freePlay() {
         return game.freePlay;
+      },
+      get controls() {
+        return game.controls;
       },
     };
   }

@@ -25,15 +25,21 @@ export class Shell {
     return this.menu.visible;
   }
 
-  showTitle(best: BestRun | null, muted: boolean): void {
+  showTitle(best: BestRun | null, muted: boolean, padConnected = false): void {
     this.screen = 'title';
+    const bestRows = best
+      ? `<dt>Best run</dt><dd>round ${best.reachedRound}, ${best.roundsCleared} cleared</dd>
+         <dt>Goals</dt><dd>${best.goalsFor} for, ${best.goalsAgainst} against</dd>`
+      : '<dt>Best run</dt><dd>none yet</dd>';
+    // Pads are invisible to the page until one is touched, so say which it is
+    // rather than leaving someone holding a pad to wonder.
+    const padRow = `<dt>Controller</dt><dd>${
+      padConnected ? 'connected' : 'press any button to connect'
+    }</dd>`;
     this.menu.show({
       title: 'Rocket Gauntlet',
       subtitle: 'Clear the rounds back to back. One loss ends the run.',
-      bodyHtml: best
-        ? `<dl><dt>Best run</dt><dd>round ${best.reachedRound}, ${best.roundsCleared} cleared</dd>
-            <dt>Goals</dt><dd>${best.goalsFor} for, ${best.goalsAgainst} against</dd></dl>`
-        : '<dl><dt>Best run</dt><dd>none yet</dd></dl>',
+      bodyHtml: `<dl>${bestRows}${padRow}</dl>`,
       items: [
         { id: 'start', label: 'Start run', hint: 'Round one. Escalates from there.' },
         { id: 'freeplay', label: 'Free play', hint: 'No clock, no opponents. Get a feel for the car.' },

@@ -310,6 +310,13 @@ export const config = {
     suddenDeath: true,
   },
 
+  input: {
+    /** Stick movement below this is ignored, then the rest is rescaled. */
+    padDeadzone: 0.14,
+    /** Analog trigger pull that counts as a button press. */
+    padTriggerThreshold: 0.3,
+  },
+
   audio: {
     /** Overall volume. */
     master: 0.5,

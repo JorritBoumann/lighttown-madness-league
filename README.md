@@ -51,6 +51,26 @@ The known gaps are listed at the end.
 | `M` | Mute |
 | `P` | Tuning panel |
 
+Gamepad, on Rocket League's own defaults, because anyone reaching for a pad for
+this game already has those in their hands:
+
+| Button | Action |
+| --- | --- |
+| `RT` / `LT` | Throttle / reverse, analog |
+| Left stick | Steer; pitch and yaw in the air |
+| `A` | Jump, hold for height, tap again to flip |
+| `B` | Boost |
+| `X` | Powerslide |
+| `LB` / `RB` | Air roll left / right |
+| `Y` | Ball cam |
+| `Start` | Pause · `Back` Mute |
+| D-pad, `A` | Navigate menus |
+
+Both devices are live at once rather than one being selected: switching should
+be a matter of picking the other one up. The controls reminder in the corner
+swaps to whichever was used last, since showing keyboard hints to someone
+holding a pad is worse than showing nothing.
+
 ## Tuning
 
 Every constant that affects feel lives in [`src/config.ts`](src/config.ts).
@@ -101,6 +121,25 @@ Own goals are attributed from the last touch and credited to the other side.
 the ball is and reports what happened, and the caller does the resetting. That
 is what makes it testable without a physics world, and it is why the gauntlet
 can drive it with whatever rules a round needs.
+
+## Input
+
+Everything above the input layer deals in **actions**, not keys or button
+numbers: `pause`, `ballCam`, `menuSelect`, `pick1`. Without that, adding a pad
+means every hotkey and every menu key in the game grows a second branch; with
+it, a device is a source that produces the same actions.
+
+Three pieces in [`src/input`](src/input): the keyboard, the pad, and
+[`controls.ts`](src/input/controls.ts) which merges them. Analog axes take
+whichever input is pushed further rather than adding, so holding a key while a
+stick is half over does not overshoot; buttons are an or; and the jump latch is
+consumed from both, so a tap on either is acted on exactly once.
+
+A pad is polled rather than pushed — the browser hands out immutable snapshots,
+so there is nothing to subscribe to and a fresh read is needed every frame.
+Pads are also invisible to the page until one is touched, which is why the title
+screen says "press any button to connect" rather than claiming there is no
+controller.
 
 ## Screens
 
@@ -319,7 +358,7 @@ src/
   core/      loop, interpolation, arena geometry, curves, math helpers
   physics/   rapier world, arena colliders, car, ball, boost pads
   ai/        bots, difficulty tiers, ball prediction
-  input/     CarInput contract, keyboard source
+  input/     CarInput contract, actions, keyboard and gamepad, merged controls
   state/     match flow, run and rounds, modifiers, upgrades, persistence
   render/    three scene, meshes, chase camera
   ui/        car HUD, scoreboard and banners, tuning panel
@@ -335,7 +374,7 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-229 tests, no browser needed.
+255 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -364,6 +403,12 @@ leaves the ball able to fit through the goal, that no bot tier starts a match
 already hunting boost, that no upgrade touches a config path the bots read, and
 that re-applying a run's upgrades is idempotent.
 
+The gamepad tests matter more than most, because I have no pad to try this with:
+a fake one is just an object returned from `navigator.getGamepads`, which makes
+the whole mapping testable without a device — analog trigger pressure, the
+deadzone curve, the press-release-press edge on jump, and both devices driving
+together.
+
 The menu and particle tests cover things that fail quietly: a pool that never
 frees anything simply stops showing new effects, which looks like the effect was
 never written. The sound tests check it stays silent and throws nothing with no
@@ -386,10 +431,11 @@ Honest list of what is not there, in rough order of how much it matters:
   nothing more: a bot will not go up for a ball that needs real air play, and
   cannot defend one. No boss leans on this, so it has not bitten, but it is the
   largest remaining hole in the AI.
-- **No gamepad support.** The brief asked for keyboard first and gamepad
-  afterwards; the afterwards has not happened. `CarInput` is the single contract
-  every driver produces, so a pad is a new source rather than a change to
-  anything downstream.
+- **The gamepad mapping has never been tried on a real pad.** It is tested
+  against a faked one down to analog trigger pressure and deadzone curves, and
+  driven in the browser through a synthetic pad, but no physical controller has
+  touched it. Button numbering follows the W3C standard mapping, which most
+  pads report; anything exotic may be mapped oddly.
 - **Finishing from wide angles is a coin flip at best** even at the top tier:
   44% of randomised chances. See the AI section for the measurements.
 - **The bundle is 5MB** because `rapier3d-compat` inlines its WebAssembly as

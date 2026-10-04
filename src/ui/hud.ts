@@ -7,17 +7,15 @@ export class Hud {
   private readonly boostArc: SVGCircleElement;
   private readonly boostValue: HTMLElement;
   private readonly speedValue: HTMLElement;
+  private readonly help: HTMLElement;
+  private device: 'keyboard' | 'gamepad' | null = null;
   private readonly flags: Record<string, HTMLElement> = {};
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
     this.root.className = 'hud-layer';
     this.root.innerHTML = `
-      <div class="hud-help">
-        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive &middot; in air: <kbd>W</kbd>/<kbd>S</kbd> pitch, <kbd>A</kbd>/<kbd>D</kbd> yaw</div>
-        <div><kbd>Space</kbd> jump (hold for height, tap again to flip) &middot; <kbd>Shift</kbd> boost</div>
-        <div><kbd>Q</kbd>/<kbd>E</kbd> air roll &middot; <kbd>C</kbd> powerslide &middot; <kbd>T</kbd> ball cam &middot; <kbd>M</kbd> mute &middot; <kbd>P</kbd> tuning &middot; <kbd>Esc</kbd> pause</div>
-      </div>
+      <div class="hud-help" data-help></div>
       <div class="hud-flags">
         <i data-flag="ground">Ground</i>
         <i data-flag="boost">Boost</i>
@@ -41,9 +39,28 @@ export class Hud {
     this.boostArc = this.root.querySelector('[data-arc]') as SVGCircleElement;
     this.boostValue = this.root.querySelector('[data-boost]') as HTMLElement;
     this.speedValue = this.root.querySelector('[data-speed]') as HTMLElement;
+    this.help = this.root.querySelector('[data-help]') as HTMLElement;
+    this.setDevice('keyboard');
     for (const el of this.root.querySelectorAll<HTMLElement>('[data-flag]')) {
       this.flags[el.dataset.flag as string] = el;
     }
+  }
+
+  /**
+   * Swaps the controls reminder for whichever device is in use. Showing keyboard
+   * hints to someone holding a pad is worse than showing nothing.
+   */
+  setDevice(device: 'keyboard' | 'gamepad'): void {
+    if (device === this.device) return;
+    this.device = device;
+    this.help.innerHTML =
+      device === 'gamepad'
+        ? `<div><kbd>RT</kbd>/<kbd>LT</kbd> drive &middot; <kbd>L stick</kbd> steer, pitch in air</div>
+           <div><kbd>A</kbd> jump (hold for height, tap again to flip) &middot; <kbd>B</kbd> boost</div>
+           <div><kbd>LB</kbd>/<kbd>RB</kbd> air roll &middot; <kbd>X</kbd> powerslide &middot; <kbd>Y</kbd> ball cam &middot; <kbd>Start</kbd> pause</div>`
+        : `<div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive &middot; in air: <kbd>W</kbd>/<kbd>S</kbd> pitch, <kbd>A</kbd>/<kbd>D</kbd> yaw</div>
+           <div><kbd>Space</kbd> jump (hold for height, tap again to flip) &middot; <kbd>Shift</kbd> boost</div>
+           <div><kbd>Q</kbd>/<kbd>E</kbd> air roll &middot; <kbd>C</kbd> powerslide &middot; <kbd>T</kbd> ball cam &middot; <kbd>M</kbd> mute &middot; <kbd>P</kbd> tuning &middot; <kbd>Esc</kbd> pause</div>`;
   }
 
   update(car: Car, ballCam: boolean): void {
