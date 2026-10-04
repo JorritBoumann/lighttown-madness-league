@@ -196,6 +196,19 @@ export const config = {
     hasCeiling: true,
   },
 
+  match: {
+    /** Match length in seconds. Gauntlet rounds sit in the 60-90 band. */
+    durationSeconds: 90,
+    /** Reaching this many goals wins there and then. 0 means time only. */
+    goalTarget: 3,
+    /** Countdown before kickoff. */
+    countdown: 3,
+    /** How long the goal celebration holds before the next kickoff. */
+    goalPause: 2.5,
+    /** A draw at full time goes to sudden death: next goal wins. */
+    suddenDeath: true,
+  },
+
   camera: {
     /** Rocket League's own camera defaults. */
     fov: 110,

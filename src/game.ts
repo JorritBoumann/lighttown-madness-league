@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { cfg } from './config';
-import { initPhysics, PhysicsWorld } from './physics/world';
+import { initPhysics, PhysicsWorld, type RAPIER } from './physics/world';
 import { createArena, type Arena } from './physics/arena';
 import { kickoffSpawns } from './core/arenaLayout';
 import { Ball } from './physics/ball';
@@ -15,11 +15,15 @@ import { ChaseCamera } from './render/chaseCamera';
 import { TransformInterpolator } from './core/interpolate';
 import { Loop } from './core/loop';
 import { Hud } from './ui/hud';
+import { MatchHud } from './ui/matchHud';
 import { TweakPanel } from './ui/tweakPanel';
+import { Match, type GoalEvent, type MatchResult } from './state/match';
 
 /**
- * Stage 1 slice: arena, one car, the ball, the camera and the tuning loop.
- * Match flow, AI and the gauntlet hang off this later.
+ * Wires the systems together: physics, rendering, input, match flow.
+ *
+ * Stage 2: one car, the ball, goals, a clock and a score. AI opponents and the
+ * gauntlet hang off this next.
  */
 export class Game {
   private readonly phys: PhysicsWorld;
@@ -40,9 +44,13 @@ export class Game {
 
   private readonly keyboard: Keyboard;
   private readonly hud: Hud;
+  private readonly matchHud: MatchHud;
   private readonly panel: TweakPanel;
   private readonly loop: Loop;
 
+  private match!: Match;
+  /** Stands in for the keyboard while `advance()` drives the game. */
+  private inputOverride: Partial<CarInput> | null = null;
   private time = 0;
 
   private constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
@@ -68,6 +76,8 @@ export class Game {
 
     this.keyboard = new Keyboard();
     this.hud = new Hud(ui);
+    this.matchHud = new MatchHud(ui);
+    this.startMatch();
     this.panel = new TweakPanel(ui);
     this.panel.onChange(() => this.syncConfig());
 
@@ -91,7 +101,7 @@ export class Game {
     this.loop.start();
   }
 
-  /** Kickoff spot for the player: the middle one at the -x end. */
+  /** Kickoff spot for the player: the middle one at their own end. */
   private spawn(): { pos: { x: number; y: number; z: number }; yaw: number } {
     const spot = kickoffSpawns(-1)[4]!;
     return {
@@ -100,19 +110,79 @@ export class Game {
     };
   }
 
+  /** Starts a fresh match and puts everyone on the kickoff line. */
+  private startMatch(): void {
+    this.match = new Match(
+      {},
+      {
+        onGoal: (e) => this.onGoal(e),
+        onKickoff: () => this.setUpKickoff(),
+        onEnd: (r) => this.onMatchEnd(r),
+      },
+    );
+    this.matchHud.reset();
+    this.setUpKickoff();
+  }
+
+  private onGoal(event: GoalEvent): void {
+    this.matchHud.goal(event);
+  }
+
+  private onMatchEnd(result: MatchResult): void {
+    this.matchHud.end(result);
+  }
+
+  /** Everyone back to their lines, ball on the spot, pads back up. */
+  private setUpKickoff(): void {
+    const start = this.spawn();
+    this.car.reset(start.pos, start.yaw);
+    this.ball.reset();
+    this.pads.resetAll();
+    this.carInterp.snap(this.car.position, this.car.body.rotation());
+    this.ballInterp.snap(this.ball.position, this.ball.body.rotation());
+    this.chase.snapTo(this.car.position, this.car.forward());
+  }
+
+  /** Holds a body still, for the countdown and after full time. */
+  private freeze(body: RAPIER.RigidBody): void {
+    const zero = { x: 0, y: 0, z: 0 };
+    body.setLinvel(zero, false);
+    body.setAngvel(zero, false);
+  }
+
   private fixedStep(dt: number): void {
     this.time += dt;
 
     this.carInterp.record(this.car.position, this.car.body.rotation());
     this.ballInterp.record(this.ball.position, this.ball.body.rotation());
 
-    this.car.input = this.keyboard.read();
+    const phase = this.match.phase;
+    // Only 'playing' hands control over. The countdown holds everyone on their
+    // line; after a goal the ball keeps rolling for show but nobody drives.
+    const driving = phase === 'playing';
+    if (driving) {
+      this.car.input = this.inputOverride
+        ? { ...emptyInput(), ...this.inputOverride }
+        : this.keyboard.read();
+    } else {
+      this.car.input = emptyInput();
+      // Reading anyway keeps the jump latch from banking a press for later.
+      if (!this.inputOverride) this.keyboard.read();
+    }
+
+    if (phase === 'countdown' || phase === 'ended') {
+      this.freeze(this.car.body);
+      this.freeze(this.ball.body);
+    }
+
     this.car.update(dt);
     this.ball.update();
-    this.pads.update(dt, [this.car]);
+    if (driving) this.pads.update(dt, [this.car]);
 
     this.phys.step();
     this.drainContactEvents();
+
+    this.match.update(dt, { position: this.ball.position, radius: cfg.ball.radius });
   }
 
   /** Car-on-ball touches get the speed-dependent bounce on top of the contact. */
@@ -123,7 +193,10 @@ export class Game {
       if (!started) return;
       const pair =
         (h1 === ballHandle && h2 === carHandle) || (h2 === ballHandle && h1 === carHandle);
-      if (pair) this.carBall.apply(this.car, this.ball);
+      if (!pair) return;
+      this.carBall.apply(this.car, this.ball);
+      // Needed to tell an own goal from a goal.
+      this.match.touch(this.car.team);
     });
   }
 
@@ -148,6 +221,7 @@ export class Game {
 
     this.handleHotkeys();
     this.hud.update(this.car, this.chase.ballCam);
+    this.matchHud.update(this.match, dt);
     this.keyboard.endFrame();
 
     this.render.renderer.render(this.render.scene, this.render.camera);
@@ -156,7 +230,7 @@ export class Game {
   private handleHotkeys(): void {
     if (this.keyboard.wasPressed('KeyT')) this.chase.toggleBallCam();
     if (this.keyboard.wasPressed('KeyP')) this.panel.toggle();
-    if (this.keyboard.wasPressed('KeyR')) this.resetPlay();
+    if (this.keyboard.wasPressed('KeyR')) this.startMatch();
     if (this.keyboard.wasPressed('KeyB')) this.ball.reset();
   }
 
@@ -167,15 +241,9 @@ export class Game {
     this.carBall.syncConfig();
   }
 
-  /** Kick-off state: car on its line, ball in the middle, pads back up. */
+  /** Restarts the match from nothing. Bound to R. */
   resetPlay(): void {
-    const start = this.spawn();
-    this.car.reset(start.pos, start.yaw);
-    this.ball.reset();
-    this.pads.resetAll();
-    this.carInterp.snap(this.car.position, this.car.body.rotation());
-    this.ballInterp.snap(this.ball.position, this.ball.body.rotation());
-    this.chase.snapTo(this.car.position, this.car.forward());
+    this.startMatch();
   }
 
   /**
@@ -186,16 +254,12 @@ export class Game {
   advance(seconds: number, input?: Partial<CarInput>): void {
     const dt = cfg.physics.fixedDt;
     const steps = Math.max(1, Math.round(seconds / dt));
-    for (let i = 0; i < steps; i++) {
-      this.time += dt;
-      this.carInterp.record(this.car.position, this.car.body.rotation());
-      this.ballInterp.record(this.ball.position, this.ball.body.rotation());
-      this.car.input = input ? { ...emptyInput(), ...input } : this.keyboard.read();
-      this.car.update(dt);
-      this.ball.update();
-      this.pads.update(dt, [this.car]);
-      this.phys.step();
-      this.drainContactEvents();
+    // Goes through the real fixed step, so this cannot drift from normal play.
+    this.inputOverride = input ?? null;
+    try {
+      for (let i = 0; i < steps; i++) this.fixedStep(dt);
+    } finally {
+      this.inputOverride = null;
     }
     this.drawOnly(seconds);
   }
@@ -219,12 +283,35 @@ export class Game {
 
   /** Exposed for debugging from the console and for tests. */
   get debug(): {
-    car: Car;
-    ball: Ball;
-    arena: Arena;
-    pads: BoostPads;
-    phys: PhysicsWorld;
+    readonly car: Car;
+    readonly ball: Ball;
+    readonly arena: Arena;
+    readonly pads: BoostPads;
+    readonly phys: PhysicsWorld;
+    readonly match: Match;
   } {
-    return { car: this.car, ball: this.ball, arena: this.arena, pads: this.pads, phys: this.phys };
+    // Getters rather than a snapshot: the match is replaced on every restart,
+    // and a held reference to the old one silently reports stale state.
+    const game = this;
+    return {
+      get car() {
+        return game.car;
+      },
+      get ball() {
+        return game.ball;
+      },
+      get arena() {
+        return game.arena;
+      },
+      get pads() {
+        return game.pads;
+      },
+      get phys() {
+        return game.phys;
+      },
+      get match() {
+        return game.match;
+      },
+    };
   }
 }

@@ -107,11 +107,19 @@ export class Car {
   private readonly cornerVel = new THREE.Vector3();
   private readonly alignQ = new THREE.Quaternion();
 
+  /**
+   * Which side this car plays for. Team 0 defends the -x end. Kept as a plain
+   * number so the physics layer does not need to know about match state.
+   */
+  readonly team: 0 | 1;
+
   constructor(
     private readonly phys: PhysicsWorld,
     spawn: { x: number; y: number; z: number },
     spawnYaw = 0,
+    team: 0 | 1 = 0,
   ) {
+    this.team = team;
     const h = cfg.car.hitbox;
     const hx = h.length / 2;
     const hy = h.height / 2;

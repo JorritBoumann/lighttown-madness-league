@@ -132,3 +132,65 @@ html, body {
   cursor: pointer;
 }
 .panel .row { display: flex; gap: 8px; margin-bottom: 12px; }
+
+/* --- Match HUD --- */
+.scoreboard {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+.scoreboard .side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  background: rgba(10, 14, 24, 0.72);
+}
+.scoreboard .side.blue { border-bottom: 3px solid #42a5f5; border-radius: 6px 0 0 6px; }
+.scoreboard .side.orange { border-bottom: 3px solid #ff7043; border-radius: 0 6px 6px 0; }
+.scoreboard .side b { font-size: 30px; font-weight: 650; }
+.scoreboard .side .label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.scoreboard .clock {
+  display: grid;
+  place-items: center;
+  min-width: 92px;
+  padding: 8px 14px;
+  background: rgba(10, 14, 24, 0.85);
+  font-size: 24px;
+  font-weight: 600;
+}
+.scoreboard .clock.low { color: #ff8a65; }
+.scoreboard .clock.overtime { color: #ffc14d; }
+
+.banner {
+  position: absolute;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9);
+}
+.banner[hidden] { display: none !important; }
+.banner-title {
+  font-size: 64px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.banner-sub {
+  margin-top: 10px;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}

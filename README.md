@@ -14,6 +14,24 @@ npm run dev
 
 Then open http://127.0.0.1:5173.
 
+## Where this is up to
+
+Build order from the brief, and what exists:
+
+| Step | Status |
+| --- | --- |
+| 1. Arena, car, ball, camera | Done |
+| 2. Goals, scoring, match flow | Done |
+| 3. One AI bot | Next |
+| 4. Gauntlet structure and round escalation | Not started |
+| 5. Upgrades between rounds | Not started |
+| 6. Boss rounds | Not started |
+| 7. Menus, run summary, polish | Not started |
+
+There is no opponent yet, so a match is you against an empty net: you can score,
+and you can score on yourself. The flow around it is complete — countdown,
+clock, goals, kickoffs, win conditions, sudden death.
+
 ## Controls
 
 | Key | Action |
@@ -25,8 +43,8 @@ Then open http://127.0.0.1:5173.
 | `Q` / `E` | Air roll left / right |
 | `C` | Powerslide |
 | `T` | Ball cam |
-| `R` | Reset car and ball |
-| `B` | Reset ball only |
+| `R` | Restart the match |
+| `B` | Reset the ball only |
 | `P` | Tuning panel |
 
 ## Tuning
@@ -64,17 +82,34 @@ Two interchangeable ways to change any of it, both live:
 The throttle and steering curves are lookup tables rather than single numbers,
 so they live in the file rather than on a slider.
 
+## Match rules
+
+Set in the `match` block of [`src/config.ts`](src/config.ts): 90 seconds, first
+to 3, a 3 second countdown, 2.5 seconds of goal celebration, sudden death on a
+draw. The gauntlet will drive these per round rather than reading the defaults.
+
+A goal needs the ball *fully* past the line, as in the real game: its centre a
+full radius beyond `goalLine`, inside the mouth and under the bar. The clock
+holds during the celebration and the countdown, so only playing time counts.
+Own goals are attributed from the last touch and credited to the other side.
+
+[`src/state/match.ts`](src/state/match.ts) owns no entities — it is told where
+the ball is and reports what happened, and the caller does the resetting. That
+is what makes it testable without a physics world, and it is why the gauntlet
+can drive it with whatever rules a round needs.
+
 ## Layout
 
 ```
 src/
   config.ts            all tuning constants, live-reloadable
   game.ts              wires the systems together
-  core/      loop, interpolation, arena geometry, math helpers
+  core/      loop, interpolation, arena geometry, curves, math helpers
   physics/   rapier world, arena colliders, car, ball, boost pads
   input/     CarInput contract, keyboard source
+  state/     match flow: clock, score, goals, win conditions
   render/    three scene, meshes, chase camera
-  ui/        HUD, tuning panel
+  ui/        car HUD, scoreboard and banners, tuning panel
 tests/       headless physics checks (vitest)
 ```
 
@@ -87,13 +122,21 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-58 tests, no browser needed. The ones that matter check the handling against the
-figures above rather than just checking it does not crash: that throttle tops out
-at 1410 and boost carries you to 2300, that acceleration collapses near the top
-end, that braking stops the car inside half a second, that turn radius widens
-with speed, that jump heights match their closed-form values, that a dodge adds
-its own 500, that roll is far faster than pitch or yaw, and that a fast car
-transitions onto the side wall and climbs it with its wheels down.
+82 tests, no browser needed.
+
+The handling tests check against the published figures rather than just checking
+it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
+that acceleration collapses near the top end, that braking stops the car inside
+half a second, that turn radius widens with speed, that jump heights match their
+closed-form values, that a dodge adds its own 500, that roll is far faster than
+pitch or yaw, and that a fast car transitions onto the side wall and climbs it
+with its wheels down.
+
+The match tests run the rules with no physics at all — a ball position and a
+clock is all the state machine needs: full crossing of the line, balls wide of
+the mouth and over the bar, own goal attribution, one goal rather than one per
+step in the net, the kickoff cycle, the goal target, time expiry, sudden death,
+and that nothing scores before kickoff or after full time.
 
 ## Debugging
 

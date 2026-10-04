@@ -15,7 +15,7 @@ export class Hud {
       <div class="hud-help">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive &middot; in air: <kbd>W</kbd>/<kbd>S</kbd> pitch, <kbd>A</kbd>/<kbd>D</kbd> yaw</div>
         <div><kbd>Space</kbd> jump (hold for height, tap again to flip) &middot; <kbd>Shift</kbd> boost</div>
-        <div><kbd>Q</kbd>/<kbd>E</kbd> air roll &middot; <kbd>C</kbd> powerslide &middot; <kbd>T</kbd> ball cam &middot; <kbd>R</kbd> reset &middot; <kbd>P</kbd> tuning</div>
+        <div><kbd>Q</kbd>/<kbd>E</kbd> air roll &middot; <kbd>C</kbd> powerslide &middot; <kbd>T</kbd> ball cam &middot; <kbd>R</kbd> restart match &middot; <kbd>P</kbd> tuning</div>
       </div>
       <div class="hud-flags">
         <i data-flag="ground">Ground</i>
