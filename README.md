@@ -346,22 +346,52 @@ different kind of thing. The knobs that matter, in order:
 
 Two benchmarks, because one was not enough to see the problem.
 
-**Finishing**: a hundred randomised chances from all over the pitch, twelve
-seconds each, measuring whether the bot converts.
+Three benchmarks, because no one of them told the whole story.
 
-| Tier | | Converted | Ball direction error |
-| --- | --- | --- | --- |
-| 1 | Rookie | 7% | 39 degrees |
-| 2 | Amateur | 14% | 22 degrees |
-| 3 | Pro | 34% | 12 degrees |
-| 4 | Veteran | 36% | 12 degrees |
-| 5 | Champion | 44% | 10 degrees |
+**Finishing**: randomised chances from all over the pitch, twelve seconds each.
+**Wide finishing**: the same, but with the ball out near a side wall in the
+attacking half. **Match**: goals in ninety seconds against an idle opponent.
 
-**Match**: goals in ninety seconds against an idle opponent, over six seeds —
-1.2, 1.7, 9.8, 13.2, 12.8 for tiers one to five. This one saturates at the top,
-because the ball returns to the centre spot after every goal and the ceiling is
-the goal-and-kickoff cycle rather than the bot's skill. It cannot separate tiers
-four and five; the finishing benchmark can.
+| Tier | | Finishing | Wide | Goals / 90s |
+| --- | --- | --- | --- | --- |
+| 1 | Rookie | 10% | 10% | 1.0 |
+| 2 | Amateur | 20% | 22% | 2.4 |
+| 3 | Pro | 33% | 36% | 12.5 |
+| 4 | Veteran | 36% | 47% | 13.1 |
+| 5 | Champion | 42% | 47% | 13.8 |
+
+Having all three mattered: a change that looked like a five-point regression on
+one of them turned out to be noise once the sample was doubled, and a change
+that helped two of them cost a third of tier three's goals on the one that
+counted most.
+
+### Wide-angle finishing
+
+Wide chances convert at 47 per cent at the top two tiers, up from about 44. The
+whole gain came from one line — bots used to stop boosting 900 units out and
+coast the final approach, so their shots arrived at roughly half the pace they
+could and stopped short of the net. Boosting right up to the ball is worth
+between a third and half a goal a match at the top tiers, and at tier three it
+is worth four and a half: 8.1 goals a match to 12.5.
+
+Two things that sound obviously right measured worse and were dropped:
+
+- **Aiming nearer the close post.** From out wide the middle of the goal is the
+  longest diagonal on the pitch, so a shorter shot ought to help. It converted
+  36 against 46. The reason is in the diagnosis: *every* ball that reaches the
+  back wall goes in — not one in a hundred attempts finished wide of the mouth —
+  so distance is not what beats these chances. The ball never arriving is, and
+  the middle has the most goal behind it when the touch is imperfect.
+- **Capping the arrival speed** to stop the car overshooting the ball. Flat out
+  does cost touches, 250 against 348 over two hundred chances. But fast strikes
+  are the *accurate* ones — off-centre by 17 units at 1600uu/s against 57 at
+  800, because a car at speed travels in a straight line and has no time to
+  wander off it — and capping cost tier three a third of its goals for about
+  half a goal gained at tier four.
+
+What limits these chances is touches in the time available, not accuracy. A
+typical miss is one touch, the ball travelling the right way, and the clock
+running out before a second one.
 
 ### How the finishing was fixed
 
@@ -490,7 +520,7 @@ game does, so a deploy does not invalidate them.
 npm test
 ```
 
-297 tests, no browser needed.
+299 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -567,8 +597,6 @@ Honest list of what is not there, in rough order of how much it matters:
   driven in the browser through a synthetic pad, but no physical controller has
   touched it. Button numbering follows the W3C standard mapping, which most
   pads report; anything exotic may be mapped oddly.
-- **Finishing from wide angles is a coin flip at best** even at the top tier:
-  44% of randomised chances. See the AI section for the measurements.
 - **The WebAssembly is 1.1MB gzipped** and there is no obvious way around it:
   it is Rapier's own build, and most of the size is features this game never
   touches, soft bodies among them. It downloads once and caches, but a first

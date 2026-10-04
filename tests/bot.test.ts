@@ -399,32 +399,91 @@ describe('striking the ball', () => {
     expect(Math.abs(drifting - still)).toBeGreaterThan(40);
   });
 
+  it('boosts right up to the ball rather than coasting the last stretch', () => {
+    // Cutting boost early leaves the shot arriving at about half the pace it
+    // could, and the ball stops short of the net. Measured across match play,
+    // boosting in was worth two to four goals a match depending on the tier.
+    ball.reset({ x: 0, y: cfg.ball.radius, z: 0 });
+    const bot = makeBot(5, { x: 2600, z: 0 }, Math.PI);
+    bot.car.boost = cfg.boost.max;
+    const dt = cfg.physics.fixedDt;
+    let boostedInside = false;
+    for (let i = 0; i < Math.round(3 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      const toBall = Math.hypot(
+        ball.position.x - bot.car.position.x,
+        ball.position.z - bot.car.position.z,
+      );
+      if (toBall < 800 && bot.car.input.boost) boostedInside = true;
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+    expect(boostedInside).toBe(true);
+  });
+
+  it('strikes the ball at pace, which is also what makes it accurate', () => {
+    ball.reset({ x: 0, y: cfg.ball.radius, z: 0 });
+    const bot = makeBot(5, { x: 2600, z: 0 }, Math.PI);
+    bot.car.boost = cfg.boost.max;
+    const dt = cfg.physics.fixedDt;
+    const bh = ball.collider.handle;
+    const ch = bot.car.collider.handle;
+    let strikeSpeed = 0;
+    for (let i = 0; i < Math.round(4 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents((h1, h2, started) => {
+        if (!started) return;
+        if ((h1 === bh && h2 === ch) || (h2 === bh && h1 === ch)) {
+          strikeSpeed = Math.max(strikeSpeed, bot.car.speed);
+        }
+      });
+      if (strikeSpeed > 0) break;
+    }
+    // Comfortably above the un-boosted ceiling, so it really did boost in.
+    expect(strikeSpeed).toBeGreaterThan(cfg.car.maxDriveSpeed);
+  });
+
   it('converts more often at a high tier than a low one', () => {
-    // A fixed spread of off-centre chances. Absolute conversion is measured by
-    // a separate benchmark; what matters here is that the tiers stay ordered,
-    // which they did not before the strike geometry was fixed.
-    const spots: [ballZ: number, carX: number, carZ: number][] = [
-      [1200, 2200, 2400],
-      [-1200, 2200, -2400],
-      [2200, 1800, 2900],
-      [-2200, 1800, -2900],
-      [600, 3000, -900],
-      [-600, 3000, 900],
-    ];
+    // A seeded spread rather than a handful of fixed spots. Six scenarios is
+    // too few to separate tiers reliably — one of them flipping is enough to
+    // reverse the result — and the ordering it is checking is real: across two
+    // hundred wide chances a Champion converts about ninety and a Rookie about
+    // twenty.
     const convert = (level: number): number => {
       let scored = 0;
-      for (const [bz, cx, cz] of spots) {
+      for (let seed = 1; seed <= 16; seed++) {
+        const rnd = seeded(seed * 31 + 7);
         phys = new PhysicsWorld();
         createArena(phys);
         ball = new Ball(phys);
         pads = new BoostPads();
-        ball.reset({ x: 0, y: cfg.ball.radius, z: bz });
-        const bot = makeBot(level, { x: cx, z: cz }, Math.PI);
+        const bz = (rnd() * 2 - 1) * 2600;
+        ball.reset({ x: -1500 + rnd() * 1500, y: cfg.ball.radius, z: bz });
+        const bot = makeBot(
+          level,
+          {
+            x: 1200 + rnd() * 2200,
+            z: Math.max(-3400, Math.min(3400, bz + (rnd() * 2 - 1) * 1600)),
+          },
+          Math.PI,
+          seed,
+        );
         if (play(bot, 12).scored) scored++;
       }
       return scored;
     };
-    expect(convert(5)).toBeGreaterThan(convert(1));
+    expect(convert(5)).toBeGreaterThan(convert(1) + 2);
   });
 });
 

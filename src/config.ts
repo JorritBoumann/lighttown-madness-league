@@ -209,7 +209,15 @@ export const config = {
     brakeToTurnSpeed: 600,
     /** Within this angle, and far enough out, it will boost. */
     boostAngle: 0.3,
-    boostMinDistance: 900,
+    /**
+     * Boost is held off until the target is this far away.
+     *
+     * Kept small on purpose. At 900 the bot stopped boosting for the whole
+     * final approach and coasted into the ball, so its shots arrived with about
+     * half the pace they could have and stopped short of the net.
+     */
+    boostMinDistance: 250,
+
     /** Ball this high and close gets a jump instead of a drive-through. */
     jumpBallHeight: 260,
     jumpRange: 420,
