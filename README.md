@@ -1,53 +1,3 @@
-### Aerials
-
-The top two tiers leave the ground for a ball they cannot reach by driving.
-Over 150 lofted balls, a Veteran goes from **no** aerial contact at all to **36**
-touches in the air, and goals roughly double, from four to seven. Grounded
-finishing is unaffected: 33 / 37 / 44 per cent against 34 / 36 / 44 before.
-
-Two halves, and the second was much harder than the first.
-
-**Air control** ([`src/ai/aerial.ts`](src/ai/aerial.ts)) points the nose at a
-direction and holds it, at any attitude, including straight up. Each axis runs a
-rate profile rather than a proportional push: never ask for more rotation than
-can be arrested in the error remaining, which is `sqrt(2 * accel * error)`. A
-proportional term cannot work here — the car builds four or five radians a
-second covering ninety degrees and needs a third of a second to stop, by which
-point it has sailed tens of degrees past.
-
-**Launch planning** decides *when* to leave the ground, and getting it wrong is
-what made the first attempt a regression. Jumping when *close* to the spot under
-the ball is the obvious rule and it is hopeless: a car launches with whatever
-ground speed it had and keeps it, so it drifts horizontally for the whole climb
-and sails past. The launch has to happen at the distance that drift will cover —
-`speed * climbTime`, often well over a thousand units out — and the same figure
-decides which interceptions are reachable at all. Replacing a fixed reach radius
-with that criterion took the launch distance from 811 to 1418, the horizontal
-miss from 399 to 163, and produced the first aerial contact there had ever been.
-
-Five bugs were found along the way, in rough order of how much they mattered:
-
-- **A directional second jump is a dodge, not a jump.** The bot held its nose-up
-  command through the frame it pressed jump again, so the car snapped into a
-  front flip and locked out air control — it was flipping itself *nose-down*
-  every single time. Peak climb 219 to 490 on that fix alone.
-- **A fixed lateral reach limit made a correct launch impossible.** Added to
-  tame an earlier regression, it only considered interceptions within about 660
-  units, when the launch needs to happen at 1400. One guess papering over
-  another.
-- **Holding jump for height blocks the double jump**, because a car needs it
-  released before the second registers.
-- **A per-axis `atan2` attitude error is wrong past ninety degrees**: the pitch
-  error of a ball overhead keeps growing as the nose passes vertical rather than
-  reversing, so the car rotated through and ended up inverted.
-- **The "upside down, do nothing" guard abandoned every aerial**, because
-  pointing the nose up tilts the roof by the same angle.
-
-A bot also only goes up when driving is not on: if the ball will be at a
-drivable height soon enough to reach, it drives. Being able to fly is not a
-reason to, and without that check a bot goes up for nearly every loose ball and
-gives up more on the ground than it wins in the air.
-
 # Rocket Gauntlet
 
 Browser-based, Rocket League-style arcade football, built around a gauntlet run:
@@ -426,42 +376,77 @@ Together they took tier three from 20% to 34%, and restored the ordering, which
 matters more: the aim scatter per tier now shows up as direction error the way
 it was always meant to, from 39 degrees at Rookie to 10 at Champion.
 
-### Aerials: built, verified, and switched off
+### Aerials
 
-There is a full aerial path in [`src/ai/aerial.ts`](src/ai/aerial.ts) and the
-`usesAerials` tier flag, and it is **off for every tier**, because turning it on
-makes bots worse. Measured over fifty lofted balls, a tier-four bot that tries
-touches the ball **eleven** times out of fifty; one that stays on the ground
-touches it **eighteen**. Tightening the trigger until attempts almost never
-happen walks the figure back up toward eighteen, which is the clearest possible
-statement that each attempt is a loss.
+The top two tiers leave the ground for a ball they cannot reach by driving.
+Over 150 lofted balls, a Veteran goes from **no** aerial contact at all to **36**
+touches in the air, and goals roughly double, from four to seven. Grounded
+finishing is unaffected: 33 / 37 / 44 per cent against 34 / 36 / 44 before.
 
-The air control underneath does work, and is tested: asked to point somewhere, a
-car gets there and holds it without overshooting, including straight up and
-straight down, and it will climb past a thousand units under boost. Four real
-bugs were found and fixed getting it that far:
+Three parts, each harder than the one before.
 
-- **A directional second jump is a dodge, not a jump.** The bot was holding its
-  nose-up command through the frame it pressed jump again, so the car snapped
-  into a front flip and locked out air control — it was flipping itself
-  nose-down every single time. Peak climb went from 219 units to 490 on that one
-  fix alone, and the isolated controller from 386 to 1455.
+**Air control** ([`src/ai/aerial.ts`](src/ai/aerial.ts)) points the nose at a
+direction and holds it, at any attitude, including straight up. Each axis runs a
+rate profile rather than a proportional push: never ask for more rotation than
+can be arrested in the error remaining, which is `sqrt(2 * accel * error)`. A
+proportional term cannot work here — the car builds four or five radians a
+second covering ninety degrees and needs a third of a second to stop, by which
+point it has sailed tens of degrees past.
+
+**Launch planning** decides *when* to leave the ground, and getting it wrong is
+what made the first attempt a regression. Jumping when *close* to the spot under
+the ball is the obvious rule and it is hopeless: a car launches with whatever
+ground speed it had and keeps it, so it drifts horizontally for the whole climb
+and sails past. The launch has to happen at the distance that drift will cover —
+`speed * climbTime`, often well over a thousand units out — and the same figure
+decides which interceptions are reachable at all. Replacing a fixed reach radius
+with that criterion took the launch distance from 811 to 1418, the horizontal
+miss from 399 to 163, and produced the first aerial contact there had ever been.
+
+**Aiming the touch** is the difference between reaching the ball and shooting
+it, and it was still missing once the first two worked: connections were landing
+but going 43 degrees off the goal, against 12 on the ground. Two changes, each
+measured over 120 lofted balls:
+
+- **Meet the ball on the far side, not at its centre.** `aerialContact` takes
+  the impulse that would leave the ball heading for the net — the ball's own
+  velocity subtracted, which matters far more in the air than on the ground —
+  and backs off along it by 1.2 radii. Touches rose from 28 to 30 per cent of
+  attempts at tier four and 33 to 38 at tier five, goals from 11 to 13 and 10 to
+  12, closest approach from 216 to 185.
+- **Turn onto the shot line before contact.** A touch sends the ball where the
+  car is *travelling*, and after a climb that is mostly upward, so the last
+  0.45 seconds thrust along the shot line instead of at the ball. Median touch
+  direction error 43 degrees to 39 at tier four, 43 to 37 at tier five.
+
+Two plausible refinements measured as nothing and were dropped: clamping the
+shot flatter when it points steeply downward is identical from 1.0 down to 0.25
+and worse below, and aiming further through the ball (2.0 radii) buys no extra
+touches while costing direction error. Longer strike windows are actively bad —
+0.7 seconds drops connections to 26 per cent and 1.0 to 14.
+
+Five bugs were found along the way, in rough order of how much they mattered:
+
+- **A directional second jump is a dodge, not a jump.** The bot held its nose-up
+  command through the frame it pressed jump again, so the car snapped into a
+  front flip and locked out air control — it was flipping itself *nose-down*
+  every single time. Peak climb 219 to 490 on that fix alone.
+- **A fixed lateral reach limit made a correct launch impossible.** Added to
+  tame an earlier regression, it only considered interceptions within about 660
+  units, when the launch needs to happen at 1400. One guess papering over
+  another.
 - **Holding jump for height blocks the double jump**, because a car needs it
-  released before the second one registers. The climb now holds, releases, then
-  presses again.
+  released before the second registers.
 - **A per-axis `atan2` attitude error is wrong past ninety degrees**: the pitch
-  error of a ball overhead keeps growing as the nose passes vertical instead of
-  reversing, so the car rotated straight through and ended up inverted. It now
-  uses the shortest rotation as an axis and an angle.
-- **The "I am upside down, do nothing" guard was abandoning every aerial.**
-  Pointing the nose up tilts the roof by the same angle, so a sixty degree climb
-  looked identical to falling over.
+  error of a ball overhead keeps growing as the nose passes vertical rather than
+  reversing, so the car rotated through and ended up inverted.
+- **The "upside down, do nothing" guard abandoned every aerial**, because
+  pointing the nose up tilts the roof by the same angle.
 
-What is still missing is launch planning: *arriving* at the right place with the
-right velocity. A bot drives to the spot under the ball, keeps its ground speed,
-jumps, and sails past — closest approach about 670 units when it needs 136 to
-make contact. That is a trajectory problem, not a tuning one, and guessing at it
-is what produced the regression. The pieces are in place for whoever picks it up.
+A bot also only goes up when driving is not on: if the ball will be at a
+drivable height soon enough to reach, it drives. Being able to fly is not a
+reason to, and without that check a bot goes up for nearly every loose ball and
+gives up more on the ground than it wins in the air.
 
 ## Layout
 
@@ -559,6 +544,17 @@ made aerials useless. Two more pin the car's own rule that a second jump with
 the stick held is a dodge rather than a jump, since that distinction cost four
 rounds of diagnosis.
 
+Where the touch is aimed is pinned exactly, on `aerialContact`: that the contact
+point sits on the far side of the ball from the goal, at the asked-for distance
+from its centre, that it leans into a ball crossing from the side, that it goes
+*above* a ball which has to come down into the net, and that a ball already
+travelling at the goal at shot speed produces a flat fallback rather than a NaN.
+Whether the touches actually go goalward is checked separately, over eighty
+lofted balls, but with a loose bound: twenty-odd touches cannot separate 33
+degrees from 40 without flaking, so that test guards the failure that really
+happens — a sign or frame error sending touches sideways — and the tuning is
+measured out of tree.
+
 A bot is also run at a spread of twenty lofted balls and has to meet a few of
 them in the air. One favourable scenario would pass with the launch planning
 deleted; a spread will not.
@@ -588,10 +584,12 @@ conversion stays ordered by tier.
 Honest list of what is not there, in rough order of how much it matters:
 
 - **Aerials are simple ones only.** A bot will go up for a ball it can meet on
-  a mostly ballistic path, and about a quarter of its attempts connect. It has
-  no notion of an aerial *shot* — it meets the ball rather than aiming the
-  touch — and it cannot defend one. Good enough that the top tiers feel like
-  they play above the floor; a long way from good.
+  a mostly ballistic path, and about a third of its attempts connect. It aims
+  the touch now, but only roughly: the median leaves 37 degrees off the goal
+  against 12 on the ground, so an aerial is a chance created rather than a shot
+  taken. It cannot defend one at all, and it will not double-touch or redirect.
+  Good enough that the top tiers feel like they play above the floor; a long way
+  from good.
 - **The gamepad mapping has never been tried on a real pad.** It is tested
   against a faked one down to analog trigger pressure and deadzone curves, and
   driven in the browser through a synthetic pad, but no physical controller has

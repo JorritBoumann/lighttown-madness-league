@@ -8,7 +8,15 @@ import type { BoostPad } from '../physics/boostPads';
 import { FORWARD, UP, RIGHT, WORLD_UP } from '../core/axes';
 import { BallPredictor, type BallSnapshot, type PredictedSample } from './ballPrediction';
 import { tier, type BotTier } from './tiers';
-import { pointNoseAt, aerialCost, climbTime, shouldLaunch, type AerialInputs } from './aerial';
+import {
+  pointNoseAt,
+  aerialCost,
+  aerialContact,
+  climbTime,
+  shouldLaunch,
+  type AerialContact,
+  type AerialInputs,
+} from './aerial';
 
 /**
  * Opponent bot.
@@ -107,6 +115,15 @@ export class Bot {
   private readonly target = new THREE.Vector3();
   private readonly toTarget = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
+  /** Where to meet the ball in an aerial, and where that touch should send it. */
+  private readonly meet: AerialContact = {
+    shot: new THREE.Vector3(),
+    point: new THREE.Vector3(),
+  };
+  /** The spot in the net an aerial is aimed at. */
+  private readonly netSpot = new THREE.Vector3();
+  /** The ball's predicted velocity at the interception. */
+  private readonly lastBallVelocity = new THREE.Vector3();
   /** The car's spin, read once a frame for the aerial controller. */
   private readonly angvel = new THREE.Vector3();
   private readonly fwd = new THREE.Vector3();
@@ -723,7 +740,10 @@ export class Bot {
     const step = Math.min(1 / 30, attempt.timeToIntercept);
     const samples = this.predictor.predict(ball, attempt.timeToIntercept, step);
     const at = samples[samples.length - 1];
-    if (at) attempt.target.set(at.position.x, at.position.y, at.position.z);
+    if (at) {
+      attempt.target.set(at.position.x, at.position.y, at.position.z);
+      this.lastBallVelocity.set(at.velocity.x, at.velocity.y, at.velocity.z);
+    }
   }
 
   /** Orientation gains, including what the car can actually do in the air. */
@@ -740,6 +760,30 @@ export class Bot {
       rollAccel: cfg.car.airRollAccel * air,
       maxRate: cfg.car.maxAngularSpeed,
     };
+  }
+
+  /**
+   * Where to put the car to send the ball at the goal: one ball radius or so
+   * back from it along the line the shot should take.
+   *
+   * The shot direction accounts for the ball's own motion, as the ground game
+   * does — a touch changes the ball's velocity rather than simply pushing it —
+   * which matters more in the air, where the ball is usually travelling fast.
+   */
+  private aerialContactPoint(ballAt: THREE.Vector3): void {
+    const a = cfg.ai;
+    // A shot left steeply downward is left alone. Clamping it flatter so the
+    // contact point sits behind the ball rather than above it sounds like it
+    // should help a climbing car and measures as nothing at all, while
+    // forbidding a downward shot outright is worse.
+    aerialContact({
+      ballAt,
+      ballVelocity: this.lastBallVelocity,
+      goal: this.netSpot.set(this.targetGoalX, cfg.arena.goalHeight * a.aerialGoalHeight, 0),
+      shotSpeed: a.shotSpeed,
+      offset: cfg.ball.radius * a.aerialContactRadii,
+      out: this.meet,
+    });
   }
 
   /** Whether the attempt is still worth continuing. */
@@ -776,10 +820,14 @@ export class Bot {
     this.updateAerialTarget(dt, ball);
 
     const p = this.car.position;
+    // Meet the ball on the far side from the goal rather than at its centre,
+    // so passing through it sends it at the net. Aiming at the middle of the
+    // ball makes the touch a collision with whatever heading the approach had.
+    this.aerialContactPoint(attempt.target);
     const toTarget = this.tmp.set(
-      attempt.target.x - p.x,
-      attempt.target.y - p.y,
-      attempt.target.z - p.z,
+      this.meet.point.x - p.x,
+      this.meet.point.y - p.y,
+      this.meet.point.z - p.z,
     );
 
     if (this.car.grounded && !attempt.jumped) {
@@ -837,11 +885,22 @@ export class Bot {
       }
     }
 
-    // While still well below the target, aim above it: thrust spent climbing is
-    // worth more than thrust spent closing the horizontal gap, which the car
-    // can do on the way down.
     const climb = toTarget.y;
-    if (climb > a.aerialClimbUntil) {
+    const striking = attempt.timeToIntercept <= a.aerialStrikeTime;
+
+    if (striking) {
+      // Last stretch: point along the shot line rather than at the ball.
+      //
+      // The touch goes where the car is *travelling*, and after a climb that is
+      // mostly upward. Thrusting along the shot line for a moment before
+      // contact swings the velocity onto it, which is what turns meeting the
+      // ball into shooting it. Aiming at the contact point right to the end
+      // leaves the ball flying off at whatever angle the climb arrived at.
+      toTarget.copy(this.meet.shot);
+    } else if (climb > a.aerialClimbUntil) {
+      // While still well below the target, aim above it: thrust spent climbing
+      // is worth more than thrust spent closing the horizontal gap, which the
+      // car can do on the way down.
       const bias = Math.min(1, climb / 900) * a.aerialClimbBias;
       toTarget.y += Math.hypot(toTarget.x, toTarget.z) * bias;
     }
@@ -874,8 +933,8 @@ export class Bot {
     // Thrust once roughly pointed at the aim direction. While climbing, any
     // thrust with an upward component is worth having even off-aim: height is
     // the scarce thing, and waiting for a tidy line wastes the airtime.
-    const climbing = climb > a.aerialClimbUntil;
-    const window = climbing ? a.aerialBoostAngle * 2.2 : a.aerialBoostAngle;
+    const climbing = !striking && climb > a.aerialClimbUntil;
+    const window = climbing || striking ? a.aerialBoostAngle * 2.2 : a.aerialBoostAngle;
     const noseUp = this.fwd.y > 0.15;
     i.boost = this.car.boost > 0 && (this.aim.error < window || (climbing && noseUp));
     return i;

@@ -587,7 +587,10 @@ describe('aerials', () => {
    * Measured across a spread of them rather than one, because a single
    * favourable scenario would pass with the launch planning removed.
    */
-  function lofted(level: number, seed: number): { airTouch: boolean; peak: number } {
+  function lofted(
+    level: number,
+    seed: number,
+  ): { airTouch: boolean; peak: number; dirErrs: number[] } {
     const rnd = seeded(seed);
     phys = new PhysicsWorld();
     createArena(phys);
@@ -615,6 +618,8 @@ describe('aerials', () => {
     const ch = bot.car.collider.handle;
     let airTouch = false;
     let peak = 0;
+    const dirErrs: number[] = [];
+    let touchedInAir = false;
     for (let i = 0; i < Math.round(7 / dt); i++) {
       bot.car.input = bot.think(dt, {
         ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
@@ -627,12 +632,27 @@ describe('aerials', () => {
       phys.events.drainCollisionEvents((h1, h2, started) => {
         if (!started) return;
         if ((h1 === bh && h2 === ch) || (h2 === bh && h1 === ch)) {
-          if (bot.car.position.y > 250) airTouch = true;
+          if (bot.car.position.y > 250) {
+            airTouch = true;
+            touchedInAir = true;
+          }
         }
       });
+      if (touchedInAir) {
+        // Read the ball's heading after the touch resolved, flat: how far off
+        // the goal the ball left, in degrees.
+        touchedInAir = false;
+        const v = ball.velocity;
+        const speed = Math.hypot(v.x, v.z) || 1;
+        const gx = -cfg.arena.halfLength - ball.position.x;
+        const gz = -ball.position.z;
+        const toGoal = Math.hypot(gx, gz) || 1;
+        const dot = (v.x / speed) * (gx / toGoal) + (v.z / speed) * (gz / toGoal);
+        dirErrs.push((Math.acos(Math.max(-1, Math.min(1, dot))) * 180) / Math.PI);
+      }
       peak = Math.max(peak, bot.car.position.y);
     }
-    return { airTouch, peak };
+    return { airTouch, peak, dirErrs };
   }
 
   it('meets a lofted ball in the air often enough to be worth doing', () => {
@@ -648,6 +668,24 @@ describe('aerials', () => {
     expect(hits).toBeGreaterThanOrEqual(3);
     // And it is genuinely climbing, not hopping.
     expect(Math.max(...peaks)).toBeGreaterThan(700);
+  });
+
+  it('sends the ball at the goal rather than wherever it arrived from', () => {
+    // An aerial touch goes where the car is *travelling*, and after a climb that
+    // is mostly upward, so an aerial that merely arrives at the ball sends it
+    // anywhere. Aiming at the far side of the ball and turning onto the shot
+    // line before contact brought the median here from 40 degrees off the goal
+    // to 33 over these seeds.
+    //
+    // The bound is loose on purpose. Twenty-odd touches cannot separate 33 from
+    // 40 without flaking, so this guards the failure that actually happens —
+    // a sign or frame error that sends touches sideways or backwards — and the
+    // tuning is measured out of tree instead.
+    const errs: number[] = [];
+    for (let seed = 1; seed <= 80; seed++) errs.push(...lofted(5, seed).dirErrs);
+    expect(errs.length).toBeGreaterThanOrEqual(10);
+    const sorted = [...errs].sort((a, b) => a - b);
+    expect(sorted[Math.floor(sorted.length / 2)]).toBeLessThan(50);
   });
 
   it('stays on the ground at the tiers that do not fly', () => {

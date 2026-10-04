@@ -275,6 +275,34 @@ export const config = {
     aerialClimbBias: 0.9,
     /** Below this much remaining climb it stops biasing and aims true. */
     aerialClimbUntil: 260,
+    /**
+     * Where to meet the ball in an aerial, as a multiple of its radius back
+     * along the shot line.
+     *
+     * The same point the ground game learned the hard way: flying at the ball's
+     * centre sends it wherever the approach happened to be pointing, which is
+     * why aerial touches were going 43 degrees off the goal against 12 on the
+     * ground. Meeting it on the far side from the goal is what makes the touch
+     * a shot rather than a collision.
+     */
+    aerialContactRadii: 1.2,
+    /**
+     * How high in the goal an aerial aims, as a fraction of the mouth.
+     *
+     * Not the floor: a ball struck downward from height needs somewhere to go,
+     * and the bottom of the net asks the touch to be perfect.
+     */
+    aerialGoalHeight: 0.45,
+    /**
+     * How long before contact a bot stops climbing and starts aiming the shot.
+     *
+     * Where an aerial touch sends the ball is decided by the car's *velocity*
+     * at contact, not by where its nose points, and during a climb that
+     * velocity is mostly straight up. Pointing the nose along the shot line for
+     * the last stretch is what swings the velocity onto it, and is the
+     * difference between meeting the ball and shooting.
+     */
+    aerialStrikeTime: 0.45,
     /** Upward speed a full jump sequence is worth, for planning the launch. */
     aerialLaunchSpeed: 600,
     /** Overhead for rotating nose-up before the thrust starts paying. */

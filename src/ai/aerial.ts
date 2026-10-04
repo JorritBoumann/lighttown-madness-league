@@ -236,3 +236,47 @@ export function shouldLaunch(opts: {
   const drift = opts.speed * opts.climbSeconds;
   return opts.distance <= drift * (1 + opts.tolerance);
 }
+
+/** Where to meet the ball, and the direction the touch should send it. */
+export interface AerialContact {
+  /** Unit vector along which the ball should leave. */
+  shot: THREE.Vector3;
+  /** The point to fly at: back from the ball along the shot line. */
+  point: THREE.Vector3;
+}
+
+export function aerialContact(opts: {
+  /** Where the ball will be at the intercept. */
+  ballAt: THREE.Vector3;
+  /** How fast it is travelling there, which the touch has to cancel. */
+  ballVelocity: THREE.Vector3;
+  /** The spot in the net being aimed at. */
+  goal: THREE.Vector3;
+  /** How hard the car can send the ball. */
+  shotSpeed: number;
+  /** How far back from the ball's centre to meet it, in world units. */
+  offset: number;
+  /** Written in place; nothing is allocated. */
+  out: AerialContact;
+}): AerialContact {
+  const { ballAt, ballVelocity, goal, shotSpeed, offset, out } = opts;
+  const shot = out.shot;
+
+  shot.set(goal.x - ballAt.x, goal.y - ballAt.y, goal.z - ballAt.z);
+  const len = shot.length() || 1;
+  shot.divideScalar(len).multiplyScalar(shotSpeed);
+
+  // The impulse that would leave the ball travelling that way, not the
+  // direction of the goal: a touch changes the ball's velocity rather than
+  // simply pushing it, and in the air the ball is usually moving fast.
+  shot.sub(ballVelocity);
+  if (shot.lengthSq() < 1e-6) shot.set(goal.x - ballAt.x, 0, goal.z - ballAt.z);
+  shot.normalize();
+
+  out.point.set(
+    ballAt.x - shot.x * offset,
+    ballAt.y - shot.y * offset,
+    ballAt.z - shot.z * offset,
+  );
+  return out;
+}
