@@ -348,6 +348,86 @@ describe('recovery', () => {
   });
 });
 
+describe('striking the ball', () => {
+  /** Steps the bot for a moment and reports where it ends up aiming. */
+  function aimOf(bot: Bot, seconds = 0.3): { x: number; z: number } {
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(seconds / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+    return { x: bot.aimTarget.x, z: bot.aimTarget.z };
+  }
+
+  it('aims at the near side of the ball, not past it', () => {
+    // The intuitive choice is to aim beyond the ball so as to drive through it.
+    // It is wrong: the car cuts the corner toward that point and clips the
+    // ball's edge, and an off-centre strike amplifies the approach error rather
+    // than absorbing it. Measured over sixty chances that behaviour put the
+    // strike 106uu off the shot line against a radius of 91, and halved the
+    // conversion rate.
+    ball.reset({ x: 0, y: cfg.ball.radius, z: 0 });
+    // Team 1 attacks -x, so a bot directly behind the ball sits at +x.
+    const bot = makeBot(5, { x: 2000, z: 0 }, Math.PI);
+    const aim = aimOf(bot);
+    // The aim should be on the car's side of the ball, between the two.
+    expect(aim.x).toBeGreaterThan(ball.position.x);
+    expect(aim.x).toBeLessThan(bot.car.position.x);
+    expect(bot.reasoning.committed).toBe(true);
+  });
+
+  it('leads the shot to cancel a ball drifting across', () => {
+    // A ball moving sideways carries the shot wide however cleanly it is
+    // struck, so the strike direction has to account for the ball's own motion
+    // rather than just pointing at the goal.
+    const aimFor = (ballVz: number): number => {
+      ball.reset({ x: 0, y: cfg.ball.radius, z: 0 });
+      ball.body.setLinvel({ x: 0, y: 0, z: ballVz }, true);
+      const bot = makeBot(5, { x: 2000, z: 0 }, Math.PI);
+      return aimOf(bot).z;
+    };
+    const still = aimFor(0);
+    const drifting = aimFor(900);
+    // With the ball running toward +z the bot must strike from further round
+    // that side to send it straight, so its aim moves off the centre line.
+    expect(Math.abs(drifting - still)).toBeGreaterThan(40);
+  });
+
+  it('converts more often at a high tier than a low one', () => {
+    // A fixed spread of off-centre chances. Absolute conversion is measured by
+    // a separate benchmark; what matters here is that the tiers stay ordered,
+    // which they did not before the strike geometry was fixed.
+    const spots: [ballZ: number, carX: number, carZ: number][] = [
+      [1200, 2200, 2400],
+      [-1200, 2200, -2400],
+      [2200, 1800, 2900],
+      [-2200, 1800, -2900],
+      [600, 3000, -900],
+      [-600, 3000, 900],
+    ];
+    const convert = (level: number): number => {
+      let scored = 0;
+      for (const [bz, cx, cz] of spots) {
+        phys = new PhysicsWorld();
+        createArena(phys);
+        ball = new Ball(phys);
+        pads = new BoostPads();
+        ball.reset({ x: 0, y: cfg.ball.radius, z: bz });
+        const bot = makeBot(level, { x: cx, z: cz }, Math.PI);
+        if (play(bot, 12).scored) scored++;
+      }
+      return scored;
+    };
+    expect(convert(5)).toBeGreaterThan(convert(1));
+  });
+});
+
 describe('getting unstuck', () => {
   it('backs out of the net it has driven into', () => {
     // A bot that wedges itself nose-first in the back of the net steers into it

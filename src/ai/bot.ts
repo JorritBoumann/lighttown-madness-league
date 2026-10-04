@@ -254,17 +254,26 @@ export class Bot {
     const hit = this.interceptPoint(ball);
     const p = this.car.position;
 
-    // Direction we want to send the ball.
-    const goalDx = this.targetGoalX - hit.x;
-    const goalDz = 0 - hit.z;
+    // Where we want the ball to end up.
+    const goalDx = this.targetGoalX - hit.position.x;
+    const goalDz = 0 - hit.position.z;
     const goalLen = Math.hypot(goalDx, goalDz) || 1;
-    const gx = goalDx / goalLen;
-    const gz = goalDz / goalLen;
+    const ux = goalDx / goalLen;
+    const uz = goalDz / goalLen;
+
+    // Which way to strike it. A touch changes the ball's velocity rather than
+    // simply pushing it goalward, so the direction that actually sends it at the
+    // net is the one that cancels whatever sideways drift it already has.
+    const needX = ux * a.shotSpeed - hit.velocity.x;
+    const needZ = uz * a.shotSpeed - hit.velocity.z;
+    const needLen = Math.hypot(needX, needZ) || 1;
+    const gx = needX / needLen;
+    const gz = needZ / needLen;
 
     // How well placed we already are: 1 means sitting directly behind the ball
     // with the goal beyond it, 0 means square on to the line of the shot.
-    const toHitX = hit.x - p.x;
-    const toHitZ = hit.z - p.z;
+    const toHitX = hit.position.x - p.x;
+    const toHitZ = hit.position.z - p.z;
     const toHitLen = Math.hypot(toHitX, toHitZ) || 1;
     const alignment = (toHitX / toHitLen) * gx + (toHitZ / toHitLen) * gz;
 
@@ -272,29 +281,42 @@ export class Bot {
     // push it goalward rather than across.
     const goalZ = 0;
     const botToGoal = Math.hypot(this.targetGoalX - p.x, goalZ - p.z);
-    const ballToGoal = Math.hypot(this.targetGoalX - hit.x, goalZ - hit.z);
+    const ballToGoal = Math.hypot(this.targetGoalX - hit.position.x, goalZ - hit.position.z);
     const behindBall = botToGoal > ballToGoal + a.commitBehindMargin;
+
+    // Which way the car is pointing matters as much as where it is standing:
+    // the ball leaves along the car's direction of travel, so a well-placed car
+    // that is crossing the shot line will still hit the ball sideways.
+    const headingDot = this.fwd.x * gx + this.fwd.z * gz;
 
     this.reasoning.alignment = alignment;
     this.reasoning.behindBall = behindBall;
-    this.reasoning.committed = alignment > a.commitAlignment && behindBall;
+    this.reasoning.headingDot = headingDot;
+    this.reasoning.committed =
+      alignment > a.commitAlignment && behindBall && headingDot > a.commitHeading;
 
     if (this.reasoning.committed) {
-      // Lined up: commit, and aim *past* the ball so we drive through it rather
-      // than pulling up next to it. This is what turns a nudge into a shot.
-      this.target.set(hit.x + gx * a.driveThrough, hit.y, hit.z + gz * a.driveThrough);
+      // Lined up: aim at the contact point on the near side of the ball, so the
+      // car's path runs through the ball's centre along the shot line. Aiming
+      // past the ball instead lets it cut the corner and clip the edge.
+      const contact = cfg.ball.radius * a.contactOffsetRadii;
+      this.target.set(
+        hit.position.x - gx * contact,
+        hit.position.y,
+        hit.position.z - gz * contact,
+      );
     } else {
       // Not lined up: loop round to the far side of the ball from the goal.
       // The waypoint is swung out to whichever side the car is already on, so
       // the path curves around the ball instead of straight back through it.
       const perpX = -gz;
       const perpZ = gx;
-      const sideways = (p.x - hit.x) * perpX + (p.z - hit.z) * perpZ;
+      const sideways = (p.x - hit.position.x) * perpX + (p.z - hit.position.z) * perpZ;
       const side = sideways >= 0 ? 1 : -1;
       this.target.set(
-        hit.x - gx * a.approachStandoff + perpX * side * a.approachSwing,
-        hit.y,
-        hit.z - gz * a.approachStandoff + perpZ * side * a.approachSwing,
+        hit.position.x - gx * a.approachStandoff + perpX * side * a.approachSwing,
+        hit.position.y,
+        hit.position.z - gz * a.approachStandoff + perpZ * side * a.approachSwing,
       );
     }
 
@@ -319,9 +341,9 @@ export class Bot {
    * Earliest point on the ball's path the car could plausibly get to.
    * Walks the prediction and takes the first sample it can reach in time.
    */
-  private interceptPoint(ball: BallSnapshot): { x: number; y: number; z: number } {
+  private interceptPoint(ball: BallSnapshot): BallSnapshot {
     const horizon = this.tier.predictionHorizon;
-    if (horizon <= 0) return ball.position;
+    if (horizon <= 0) return ball;
 
     const samples = this.predictor.predict(ball, horizon);
     const p = this.car.position;
@@ -331,13 +353,13 @@ export class Bot {
       const distance = Math.hypot(sample.position.x - p.x, sample.position.z - p.z);
       // Rough: current speed plus some of the acceleration still available.
       const reachable = speed * sample.time + 0.5 * 900 * sample.time * sample.time;
-      if (reachable >= distance) return sample.position;
+      if (reachable >= distance) return sample;
     }
     // Nothing on the path is reachable in time. Chase where the ball is now:
     // falling back to the furthest future sample sends the bot sprinting at a
     // spot it has already been shown it cannot make, which is how a bot ends up
     // running away from the play.
-    return ball.position;
+    return ball;
   }
 
   /**
@@ -515,6 +537,8 @@ export class Bot {
     /** Angle to the current target in the car's own frame, radians. */
     targetAngle: 0,
     distance: 0,
+    /** How well the nose lines up with the shot, as a dot product. */
+    headingDot: 0,
     /** Reversing out of something it got wedged on. */
     unsticking: false,
   };

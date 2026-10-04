@@ -184,26 +184,60 @@ different kind of thing. The knobs that matter, in order:
   past that its answer is a guess, and a bot that commits to a bad guess plays
   worse than one that chases what it can see.
 
-Measured over six seeds, goals in a 90-second match against an idle opponent:
+Two benchmarks, because one was not enough to see the problem.
 
-| Tier | | Goals / 90s |
-| --- | --- | --- |
-| 1 | Rookie | 1.0 |
-| 2 | Amateur | 2.7 |
-| 3 | Pro | 12.2 |
-| 4 | Veteran | 17.0 |
-| 5 | Champion | 14.8 |
+**Finishing**: a hundred randomised chances from all over the pitch, twelve
+seconds each, measuring whether the bot converts.
 
-Tiers four and five both saturate that benchmark — tier four scores exactly 17
-on every seed, which is close to the most the goal-and-kickoff cycle allows — so
-it cannot separate them. They should diverge against an opponent that fights
-back, which is step 4's problem.
+| Tier | | Converted | Ball direction error |
+| --- | --- | --- | --- |
+| 1 | Rookie | 7% | 39 degrees |
+| 2 | Amateur | 14% | 22 degrees |
+| 3 | Pro | 34% | 12 degrees |
+| 4 | Veteran | 36% | 12 degrees |
+| 5 | Champion | 44% | 10 degrees |
 
-**Where it is still weak:** scoring from an off-centre position in one movement
-is roughly a coin flip. It gets behind the ball and works it up the pitch
-reliably, but a first touch from a wide angle often sends the ball across rather
-than at the net, and it then has to reset. Aerials are a jump at a high ball and
-nothing more. Both are worth revisiting once round difficulty depends on them.
+**Match**: goals in ninety seconds against an idle opponent, over six seeds —
+1.2, 1.7, 9.8, 13.2, 12.8 for tiers one to five. This one saturates at the top,
+because the ball returns to the centre spot after every goal and the ceiling is
+the goal-and-kickoff cycle rather than the bot's skill. It cannot separate tiers
+four and five; the finishing benchmark can.
+
+### How the finishing was fixed
+
+The first version of this converted 13 to 25% at *every* tier, with no ordering
+at all: tier five finished no better than tier one. Three measurements found it,
+after two wrong guesses:
+
+1. Sweeping the approach distance changed nothing, so the approach was not the
+   problem. Nor was the deliberate aim scatter: at 75uu it converted the same as
+   at 4uu.
+2. Counting touches showed the bot was striking the ball at a healthy 1145uu/s,
+   so the shots were not weak.
+3. Measuring the car's direction of travel at contact against the ball's
+   direction afterwards showed the error *growing* across the touch, from 24
+   degrees to 41, with the strike landing 106uu off the shot line against a
+   ball radius of 91.
+
+That last one is the whole answer. The bot aimed at a point *past* the ball so
+as to drive through it, which sounds right and is wrong: the car cuts the corner
+toward that point, clips the ball's edge, and an off-centre strike amplifies
+whatever approach error there was instead of absorbing it. Aiming at the contact
+point on the near side instead — one and a half ball radii back along the shot
+line — halved the offset and nearly doubled conversion on its own.
+
+The second fix was to treat a touch as a change in the ball's velocity rather
+than a push toward the goal. A ball drifting across at a few hundred uu/s
+carries the shot wide however cleanly it is struck, so the strike direction is
+the one that cancels that drift: `shotSpeed * toGoal - ballVelocity`. That took
+the direction error from 25 degrees to 15.
+
+Together they took tier three from 20% to 34%, and restored the ordering, which
+matters more: the aim scatter per tier now shows up as direction error the way
+it was always meant to, from 39 degrees at Rookie to 10 at Champion.
+
+**Where it is still weak:** aerials are a jump at a high ball and nothing more.
+A bot will not go up for a ball that needs real air play, and cannot defend one.
 
 ## Layout
 
@@ -230,7 +264,7 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-175 tests, no browser needed.
+178 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -255,7 +289,10 @@ The bot is tested by what it achieves rather than what it intends: put it on the
 pitch with the real physics, seed its randomness so a flaky bot fails rather
 than fails occasionally, and check that it scores, defends, collects boost,
 recovers from a tumble, frees itself from the back of a net, and does not score
-on itself.
+on itself. Three of them pin the strike geometry, since that was worth two
+wrong guesses to find: that a committed bot aims at the near side of the ball
+rather than past it, that it leads the shot to cancel a drifting ball, and that
+conversion stays ordered by tier.
 
 ## Debugging
 

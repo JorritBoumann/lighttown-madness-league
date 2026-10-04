@@ -246,9 +246,32 @@ export const config = {
      *  on and off as the meter crosses the threshold. */
     collectHysteresis: 25,
     /** How far behind the ball a bot lines up before committing to a shot. */
-    approachStandoff: 260,
-    /** How far past the ball it aims once committed, so it drives through. */
-    driveThrough: 140,
+    approachStandoff: 700,
+    /**
+     * Where a committed bot aims, as a multiple of the ball's radius, measured
+     * back along the shot line from the ball's centre: the contact point on the
+     * near side.
+     *
+     * Aiming *past* the ball is the intuitive choice and it is wrong. The car
+     * cuts the corner toward a point beyond the ball and clips its edge, and an
+     * off-centre strike amplifies whatever approach error there was rather than
+     * absorbing it. Measured over sixty chances, aiming past the ball put the
+     * strike 106uu off the shot line against a radius of 91 and turned a 24
+     * degree approach error into 41 degrees on the ball; aiming at the contact
+     * point halved both and nearly doubled conversion.
+     */
+    contactOffsetRadii: 1.5,
+    /**
+     * How fast a bot means to hit the ball, used to work out which way to
+     * strike it.
+     *
+     * Aiming straight at the goal ignores the ball's own motion, and a ball
+     * drifting across at a few hundred uu/s carries the shot wide however
+     * cleanly it is struck. Treating the touch as a change in the ball's
+     * velocity rather than as a push in the goal's direction is what lets a bot
+     * cancel that drift.
+     */
+    shotSpeed: 1400,
     /** Sideways offset on the approach, so a bot that has overrun loops *round*
      *  the ball to get behind it. Aiming straight at the point behind the ball
      *  means driving through the ball again, knocking it the wrong way, which
@@ -262,6 +285,11 @@ export const config = {
      *  roughly goalward, tap the ball sideways, and then shepherd it along the
      *  pitch for ever without once getting behind it. */
     commitBehindMargin: 150,
+    /** And its nose has to be pointing this close to the shot line, as a dot
+     *  product. Where the ball goes is decided by which way the car is
+     *  travelling at contact, so a car that is behind the ball but crossing it
+     *  will strike it sideways however well placed it is. 0 disables the gate. */
+    commitHeading: 0.6,
   },
 
   match: {
