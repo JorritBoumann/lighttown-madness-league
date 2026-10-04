@@ -9,6 +9,15 @@
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
+    <!--
+      The physics engine is a megabyte of WebAssembly, so there is a real wait
+      before anything can be drawn. Saying so beats a blank page. Removed by
+      main.ts once the game is up.
+    -->
+    <div id="boot">
+      <div class="boot-title">Rocket Gauntlet</div>
+      <div class="boot-note">Loading physics…</div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

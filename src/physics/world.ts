@@ -1,11 +1,19 @@
-import * as RAPIER from '@dimforge/rapier3d-compat';
+import * as RAPIER from '@dimforge/rapier3d';
 import { cfg } from '../config';
 
 let initialized = false;
 
+/**
+ * Readies the physics engine.
+ *
+ * The ordinary Rapier build instantiates its WebAssembly on import and exposes
+ * no `init`; the `-compat` build the tests use does and must be awaited. Asking
+ * for it rather than assuming either keeps one call site for both.
+ */
 export async function initPhysics(): Promise<void> {
   if (initialized) return;
-  await RAPIER.init();
+  const maybeInit = (RAPIER as { init?: () => Promise<void> }).init;
+  if (typeof maybeInit === 'function') await maybeInit();
   initialized = true;
 }
 

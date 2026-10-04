@@ -452,6 +452,38 @@ tests/       headless physics checks (vitest)
 The arena's colliders and its meshes are both generated from
 `core/arenaLayout.ts`, so they cannot drift apart.
 
+## Build
+
+```bash
+npm run build     # production build into dist/
+npm run preview   # serve it
+```
+
+| | Raw | Gzipped |
+| --- | --- | --- |
+| Game code | 98 kB | 32 kB |
+| Three | 537 kB | 133 kB |
+| Rapier glue | 283 kB | 49 kB |
+| Rapier WebAssembly | 3,082 kB | 1,188 kB |
+| CSS and HTML | 9 kB | 3 kB |
+
+The JavaScript used to be **4,968 kB** in one file, because the `-compat` Rapier
+build inlines its WebAssembly as base64 — a third larger than the binary, inside
+the bundle, impossible to stream, and re-downloaded whenever a line of game code
+changes. Switching to the ordinary build and splitting the chunks took the
+JavaScript to 918 kB, and gzipped from 1,831 kB to 206 kB.
+
+Rapier is loaded two ways for one import. The browser gets the ordinary build,
+whose WebAssembly is a separate file: smaller, compiled while the rest of the
+bundle parses, and cached on its own. The test runner gets the `-compat` build,
+because WebAssembly module imports are not instantiated under Node here. That is
+safe rather than merely convenient — the two packages ship a byte-identical
+`rapier_wasm3d_bg.wasm`, same SHA-256, so the tests exercise exactly the physics
+that ships and only the loading differs.
+
+Three and Rapier are separate chunks because they change far less often than the
+game does, so a deploy does not invalidate them.
+
 ## Tests
 
 ```bash
@@ -537,9 +569,10 @@ Honest list of what is not there, in rough order of how much it matters:
   pads report; anything exotic may be mapped oddly.
 - **Finishing from wide angles is a coin flip at best** even at the top tier:
   44% of randomised chances. See the AI section for the measurements.
-- **The bundle is 5MB** because `rapier3d-compat` inlines its WebAssembly as
-  base64. Fine for development; worth moving to the non-compat build with a wasm
-  loader before this is served to anyone.
+- **The WebAssembly is 1.1MB gzipped** and there is no obvious way around it:
+  it is Rapier's own build, and most of the size is features this game never
+  touches, soft bodies among them. It downloads once and caches, but a first
+  visit still waits on it, which is why there is a boot screen.
 - **No replays, no camera options, no key rebinding.**
 
 ## Debugging
