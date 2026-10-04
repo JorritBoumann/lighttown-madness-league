@@ -219,6 +219,11 @@ export const config = {
     dodgeMinSpeed: 900,
     /** How far in front of its own goal a defending bot sits. */
     defendStandoff: 1100,
+    /** A keeper sits much closer to its line than an ordinary defender. */
+    keeperStandoff: 450,
+    /** A keeper leaves its net to clear only once the ball is this far into its
+     *  own half, as a fraction of the half length. */
+    keeperClearDepth: 0.35,
     /** Ball past this far into its own half makes a defender turn back. */
     defendTrigger: 0.25,
     /** Bots re-pick a boost pad no more often than this, to stop dithering. */

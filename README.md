@@ -25,12 +25,13 @@ Build order from the brief, and what exists:
 | 3. AI bots with tiered difficulty | Done |
 | 4. Gauntlet structure and round escalation | Done |
 | 5. Upgrades between rounds | Done |
-| 6. Boss rounds | Next |
-| 7. Menus, run summary, polish | Not started |
+| 6. Boss rounds | Done |
+| 7. Menus, run summary, polish | Next |
 
-A run is playable end to end: rounds that escalate, an upgrade picked after
-each one, a loss that ends the run, and a best run that persists. Boss rounds
-are flagged every fifth round but do not yet have their own rule set.
+A run is playable end to end: rounds that escalate, a boss every fifth round
+with its own rule set, an upgrade picked after each round, a loss that ends the
+run, and a best run that persists. What is left is presentation — menus, a
+proper run summary, sound and particles.
 
 ## Controls
 
@@ -131,6 +132,33 @@ goal dimensions are baked into colliders and meshes, so those rebuild the arena.
 how a round finished and says what happens next. The best run is kept in
 localStorage, guarded so a corrupt record or blocked storage reads as no record
 rather than breaking the game.
+
+## Boss rounds
+
+Every fifth round. Each one changes the **rules**, not just the numbers — a boss
+that is only a stronger opponent is a difficulty modifier wearing a hat. They
+cycle, so a long run meets each in turn, and a boss met later in a run is
+stronger because the round's own tier curve raises its floor.
+
+| Round | | What is different |
+| --- | --- | --- |
+| 5 | **The Wall** | One keeper, parked. Score three past it or fail — leading is not enough |
+| 10 | **The Siege** | Three attackers. Cannot be won by scoring: survive 60 seconds, concede once and the run ends |
+| 15 | **The Duel** | One champion, first goal takes it, on a slick floor |
+| 20 | **The Swarm** | Four of them. Win by three clear goals |
+| 25 | **The Lockout** | A champion keeper behind a narrow net, heavy ball, two goals needed |
+
+Two things had to exist for these to be distinct rather than cosmetic:
+
+- **Match objectives.** `goals` is the ordinary thing. `target` means reaching
+  the goal target or failing, so a boss can say "score three past this keeper"
+  and mean it — a 2-0 at full time is a loss, where in an ordinary round it
+  would be a win. `survive` cannot be won by scoring at all.
+- **Bot roles**, in [`src/ai/bot.ts`](src/ai/bot.ts). Tiers say how *good* a bot
+  is; the role says what *job* it does. A keeper hugs its line and only comes
+  out to clear a ball that has got close; an attacker never drops back whatever
+  its tier would do. Without roles, The Wall would just be a good bot that
+  happens to be standing in the way.
 
 ## Upgrades
 
@@ -264,7 +292,7 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-178 tests, no browser needed.
+207 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -275,6 +303,14 @@ pitch or yaw, and that a fast car transitions onto the side wall and climbs it
 with its wheels down. Upgrade effects are checked the same way: Triple Jump has
 to actually lift the car a third time, more grip has to mean measurably less
 slide.
+
+The boss tests play each boss out to a finish with no physics, feeding the match
+a ball position and a clock, and check the objective resolves the way the brief
+promises: that The Wall is failed by two goals and a clean sheet, that The Siege
+cannot be won early by scoring and ends the moment one is conceded, that The
+Swarm at three to one has reached its target but not its margin and so is still
+live. Role behaviour is tested by putting two bots of the same tier in the same
+situation and checking only the role changes what they do.
 
 The match, round, run and upgrade tests run the rules with no physics at all:
 goal detection, own goals, the kickoff cycle, win conditions, sudden death, the

@@ -15,6 +15,7 @@ export class RunHud {
   private readonly roundSub: HTMLElement;
   private readonly mods: HTMLElement;
   private readonly bestLine: HTMLElement;
+  private readonly brief: HTMLElement;
   private readonly card: HTMLElement;
   private readonly cardTitle: HTMLElement;
   private readonly cardBody: HTMLElement;
@@ -32,6 +33,7 @@ export class RunHud {
         <div class="round-no" data-round>Round 1</div>
         <div class="round-sub" data-round-sub></div>
         <div class="round-mods" data-mods></div>
+        <div class="boss-brief" data-brief hidden></div>
       </div>
       <div class="best-line" data-best></div>
       <div class="run-card" data-card hidden>
@@ -52,6 +54,7 @@ export class RunHud {
     this.roundSub = this.root.querySelector('[data-round-sub]') as HTMLElement;
     this.mods = this.root.querySelector('[data-mods]') as HTMLElement;
     this.bestLine = this.root.querySelector('[data-best]') as HTMLElement;
+    this.brief = this.root.querySelector('[data-brief]') as HTMLElement;
     this.card = this.root.querySelector('[data-card]') as HTMLElement;
     this.cardTitle = this.root.querySelector('[data-card-title]') as HTMLElement;
     this.cardBody = this.root.querySelector('[data-card-body]') as HTMLElement;
@@ -101,11 +104,18 @@ export class RunHud {
   roundStart(spec: RoundSpec): void {
     this.hideCard();
     this.picker.hidden = true;
-    this.roundLabel.textContent = `Round ${spec.index}`;
+    this.roundLabel.textContent = spec.isBoss
+      ? `Round ${spec.index} · ${spec.label}`
+      : `Round ${spec.index}`;
     this.roundLabel.classList.toggle('boss', spec.isBoss);
-    this.roundSub.textContent = `${spec.label} · first to ${spec.rules.goalTarget} · ${Math.round(
-      spec.rules.durationSeconds,
-    )}s`;
+    this.roundSub.textContent = spec.isBoss
+      ? objectiveLine(spec)
+      : `${spec.label} · ${objectiveLine(spec)}`;
+
+    // A boss changes the rules, so say what they are rather than leaving the
+    // player to work it out from the scoreboard.
+    this.brief.textContent = spec.isBoss && spec.boss ? spec.boss.brief : '';
+    this.brief.hidden = !spec.isBoss;
 
     this.mods.innerHTML = '';
     for (const mod of spec.modifiers) {
@@ -156,4 +166,18 @@ export class RunHud {
   private hideCard(): void {
     this.card.hidden = true;
   }
+}
+
+/** What the player has to do, in a few words. */
+function objectiveLine(spec: RoundSpec): string {
+  const r = spec.rules;
+  const seconds = `${Math.round(r.durationSeconds)}s`;
+  if (r.objective === 'survive') {
+    return r.concedeLimit === 1
+      ? `survive ${seconds} · concede once and it ends`
+      : `survive ${seconds} · concede ${r.concedeLimit} and it ends`;
+  }
+  const target = r.goalTarget > 0 ? `first to ${r.goalTarget}` : 'most goals';
+  const margin = r.winMargin > 1 ? ` by ${r.winMargin} clear` : '';
+  return `${target}${margin} · ${seconds}`;
 }

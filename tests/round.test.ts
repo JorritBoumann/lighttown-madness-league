@@ -67,9 +67,17 @@ describe('escalation curve', () => {
     for (const i of [1, 4, 6, 9, 11]) expect(buildRound(i, seeded(1)).isBoss).toBe(false);
   });
 
-  it('always goes to sudden death, so a round cannot end level', () => {
-    for (let i = 1; i <= 12; i++) {
-      expect(buildRound(i, seeded(i)).rules.suddenDeath).toBe(true);
+  it('cannot end level: every round resolves one way or the other', () => {
+    // Ordinary rounds go to sudden death. Boss rounds resolve on the clock
+    // instead, because their objective decides it: survive it or do not, reach
+    // the target or do not.
+    for (let i = 1; i <= 40; i++) {
+      const r = buildRound(i, seeded(i));
+      const resolves =
+        r.rules.suddenDeath ||
+        r.rules.objective === 'survive' ||
+        r.rules.objective === 'target';
+      expect(resolves, `round ${i} could end level`).toBe(true);
     }
   });
 

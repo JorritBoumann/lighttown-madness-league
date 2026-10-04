@@ -428,6 +428,100 @@ describe('striking the ball', () => {
   });
 });
 
+describe('roles', () => {
+  /** Steps a bot and the world forward. */
+  function step(bot: Bot, seconds: number): void {
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(seconds / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+  }
+
+  it('a keeper stays near its own net while the ball is up the other end', () => {
+    // Team 1 defends +x. Ball far away in the other half.
+    ball.reset({ x: -3000, y: cfg.ball.radius, z: 0 });
+    const car = new Car(
+      phys,
+      { x: 4200, y: cfg.car.hitbox.height / 2 + cfg.car.rideHeight, z: 0 },
+      Math.PI,
+      1,
+    );
+    const bot = new Bot(car, 4, () => 0.5, 'keeper');
+    step(bot, 6);
+    expect(bot.mode).toBe('defend');
+    // Still in its own third, not off chasing.
+    expect(car.position.x).toBeGreaterThan(cfg.arena.halfLength * 0.4);
+  });
+
+  it('a keeper comes out to clear a ball that gets close', () => {
+    ball.reset({ x: 4000, y: cfg.ball.radius, z: 0 });
+    const car = new Car(
+      phys,
+      { x: 4800, y: cfg.car.hitbox.height / 2 + cfg.car.rideHeight, z: 0 },
+      Math.PI,
+      1,
+    );
+    const bot = new Bot(car, 4, () => 0.5, 'keeper');
+    step(bot, 0.3);
+    expect(bot.mode).toBe('attack');
+  });
+
+  it('a balanced bot of the same tier leaves its net and the keeper does not', () => {
+    // Same ball, same start, same tier: only the role differs. The ball is
+    // close enough that neither would break off to fetch boost, so what is
+    // being compared really is the role.
+    const advanceOf = (role: 'keeper' | 'balanced'): number => {
+      phys = new PhysicsWorld();
+      createArena(phys);
+      ball = new Ball(phys);
+      pads = new BoostPads();
+      ball.reset({ x: 500, y: cfg.ball.radius, z: 0 });
+      const car = new Car(
+        phys,
+        { x: 3200, y: cfg.car.hitbox.height / 2 + cfg.car.rideHeight, z: 0 },
+        Math.PI,
+        1,
+      );
+      const bot = new Bot(car, 4, () => 0.5, role);
+      step(bot, 4);
+      return car.position.x;
+    };
+    expect(advanceOf('balanced')).toBeLessThan(advanceOf('keeper') - 800);
+  });
+
+  it('an attacker never drops into defence, whatever its tier would do', () => {
+    // The setup that makes a tier-3 balanced bot defend.
+    ball.reset({ x: 3000, y: cfg.ball.radius, z: 0 });
+    ball.body.setLinvel({ x: 900, y: 0, z: 0 }, true);
+    const car = new Car(
+      phys,
+      { x: 1200, y: cfg.car.hitbox.height / 2 + cfg.car.rideHeight, z: 600 },
+      Math.PI,
+      1,
+    );
+    const bot = new Bot(car, 3, () => 0.5, 'attacker');
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(1.5 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      expect(bot.mode).not.toBe('defend');
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+  });
+});
+
 describe('getting unstuck', () => {
   it('backs out of the net it has driven into', () => {
     // A bot that wedges itself nose-first in the back of the net steers into it

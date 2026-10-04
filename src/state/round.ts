@@ -1,6 +1,8 @@
 import { cfg } from '../config';
 import type { MatchRules } from './match';
-import { pickModifiers, type Modifier } from './modifiers';
+import { pickModifiers, MODIFIERS, type Modifier } from './modifiers';
+import { bossForRound, isBossRound, type BossSpec } from './bosses';
+import type { BotRole } from '../ai/bot';
 
 /**
  * Round generation and the escalation curve.
@@ -11,18 +13,28 @@ import { pickModifiers, type Modifier } from './modifiers';
  * opponent count, and modifiers.
  */
 
+/** One opponent in a round. */
+export interface RoundOpponent {
+  tier: number;
+  role: BotRole;
+}
+
 export interface RoundSpec {
   /** One-based. */
   index: number;
-  /** Every fifth round. The distinct rule set lands in step 6. */
+  /** Every fifth round, with its own rule set. */
   isBoss: boolean;
-  /** How many bots line up. */
+  /** The boss, on a boss round. */
+  boss: BossSpec | null;
+  /** The opposition, one entry per car. */
+  lineup: RoundOpponent[];
+  /** How many bots line up. Kept for convenience; same as lineup.length. */
   opponents: number;
-  /** Their difficulty tier. */
+  /** The highest tier on the field, for display. */
   tier: number;
   modifiers: Modifier[];
   rules: MatchRules;
-  /** Short label for the HUD, e.g. "Pro x2". */
+  /** Short label for the HUD, e.g. "Pro x2" or the boss's name. */
   label: string;
 }
 
@@ -60,28 +72,61 @@ export function goalTargetForRound(index: number): number {
 }
 
 export function buildRound(index: number, random: () => number = Math.random): RoundSpec {
-  const tier = tierForRound(index);
-  const opponents = opponentsForRound(index);
-  const modifiers = pickModifiers(index, modifierCountForRound(index), random);
+  const curveTier = tierForRound(index);
 
-  const rules: MatchRules = {
+  const baseRules: MatchRules = {
     durationSeconds: durationForRound(index),
     goalTarget: goalTargetForRound(index),
     countdown: cfg.match.countdown,
     goalPause: cfg.match.goalPause,
     // A draw cannot stand in a gauntlet: the run has to resolve one way or the
-    // other, so every round goes to sudden death rather than ending level.
+    // other, so an ordinary round goes to sudden death rather than ending level.
     suddenDeath: true,
+    objective: 'goals',
+    winMargin: 1,
+    concedeLimit: 0,
   };
+
+  if (isBossRound(index)) {
+    const boss = bossForRound(index);
+    // The boss's own tiers are a floor; a boss met later in a run is stronger.
+    const lineup = boss.opponents.map((o) => ({
+      tier: Math.max(o.tier, curveTier),
+      role: o.role,
+    }));
+    const modifiers = boss.modifiers
+      .map((id) => MODIFIERS.find((m) => m.id === id))
+      .filter((m): m is Modifier => m !== undefined);
+
+    return {
+      index,
+      isBoss: true,
+      boss,
+      lineup,
+      opponents: lineup.length,
+      tier: Math.max(...lineup.map((o) => o.tier)),
+      modifiers,
+      rules: { ...baseRules, ...boss.rules },
+      label: boss.name,
+    };
+  }
+
+  const count = opponentsForRound(index);
+  const lineup: RoundOpponent[] = Array.from({ length: count }, () => ({
+    tier: curveTier,
+    role: 'balanced' as BotRole,
+  }));
 
   return {
     index,
-    isBoss: index % 5 === 0,
-    opponents,
-    tier,
-    modifiers,
-    rules,
-    label: labelFor(tier, opponents),
+    isBoss: false,
+    boss: null,
+    lineup,
+    opponents: count,
+    tier: curveTier,
+    modifiers: pickModifiers(index, modifierCountForRound(index), random),
+    rules: baseRules,
+    label: labelFor(curveTier, count),
   };
 }
 

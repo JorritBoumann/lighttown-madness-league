@@ -23,6 +23,18 @@ import { tier, type BotTier } from './tiers';
 
 export type BotMode = 'attack' | 'defend' | 'collect' | 'recover' | 'unstick';
 
+/**
+ * What a bot is for. Tiers say how good it is; the role says what job it does,
+ * which is how a boss round gets a keeper rather than just a better attacker.
+ */
+export type BotRole =
+  /** Attacks and falls back as its tier allows. The ordinary opponent. */
+  | 'balanced'
+  /** Holds its own net and clears. Never goes hunting. */
+  | 'keeper'
+  /** Always forward, never defends, whatever its tier would do. */
+  | 'attacker';
+
 export interface BotWorld {
   ball: BallSnapshot & { radius: number };
   pads: readonly BoostPad[];
@@ -66,17 +78,25 @@ export class Bot {
   private readonly up = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
 
+  role: BotRole;
+
   constructor(
     readonly car: Car,
     level: number,
     /** Deterministic for tests; defaults to Math.random. */
     private readonly random: () => number = Math.random,
+    role: BotRole = 'balanced',
   ) {
     this.tier = tier(level);
+    this.role = role;
   }
 
   setLevel(level: number): void {
     this.tier = tier(level);
+  }
+
+  setRole(role: BotRole): void {
+    this.role = role;
   }
 
   /** Which end this bot defends. */
@@ -170,7 +190,17 @@ export class Bot {
   private chooseMode(ball: BallSnapshot, world: BotWorld): BotMode {
     const t = this.tier;
 
-    if (t.defends) {
+    // A keeper holds its net. It only leaves to clear a ball that has come
+    // close enough to be dangerous, which is what makes it read as a keeper
+    // rather than as an opponent that happens to be standing in the way.
+    if (this.role === 'keeper') {
+      const side = Math.sign(this.ownGoalX);
+      const ballDepth = ball.position.x * side;
+      const clearRange = cfg.arena.halfLength * cfg.ai.keeperClearDepth;
+      return ballDepth > clearRange ? 'attack' : 'defend';
+    }
+
+    if (t.defends && this.role !== 'attacker') {
       // Ball well into our own half and heading our way: get back.
       const side = Math.sign(this.ownGoalX);
       const depth = (ball.position.x / cfg.arena.halfLength) * side;
@@ -387,7 +417,9 @@ export class Bot {
     const dx = ball.position.x - goalX;
     const dz = ball.position.z - 0;
     const len = Math.hypot(dx, dz) || 1;
-    const standoff = Math.min(cfg.ai.defendStandoff, len * 0.6);
+    // A keeper hugs the line; everyone else pushes further up.
+    const reach = this.role === 'keeper' ? cfg.ai.keeperStandoff : cfg.ai.defendStandoff;
+    const standoff = Math.min(reach, len * 0.6);
     this.target.set(goalX + (dx / len) * standoff, 0, (dz / len) * standoff);
   }
 
@@ -554,6 +586,6 @@ export class Bot {
     this.stuckFor = 0;
     this.unstickFor = 0;
     this.clearOutFor = 0;
-    this.mode = 'attack';
+    this.mode = this.role === 'keeper' ? 'defend' : 'attack';
   }
 }

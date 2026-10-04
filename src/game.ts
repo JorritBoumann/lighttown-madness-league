@@ -9,7 +9,7 @@ import { BoostPads } from './physics/boostPads';
 import { CarBallInteraction } from './physics/carBall';
 import { Keyboard } from './input/keyboard';
 import { emptyInput, type CarInput } from './input/types';
-import { Bot } from './ai/bot';
+import { Bot, type BotRole } from './ai/bot';
 import { createRenderer, buildArenaMesh, disposeArenaMesh, type Renderer } from './render/scene';
 import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
 import { ChaseCamera } from './render/chaseCamera';
@@ -20,7 +20,7 @@ import { MatchHud } from './ui/matchHud';
 import { TweakPanel } from './ui/tweakPanel';
 import { Match, type GoalEvent, type MatchResult } from './state/match';
 import { Run, type RunSummary } from './state/run';
-import type { RoundSpec } from './state/round';
+import type { RoundSpec, RoundOpponent } from './state/round';
 import { ConfigOverrides } from './state/configOverride';
 import { needsArenaRebuild } from './state/modifiers';
 import { applyUpgrades, type Upgrade } from './state/upgrades';
@@ -147,7 +147,12 @@ export class Game {
   // --- setup -------------------------------------------------------------
 
   /** Adds a car. `botLevel` null makes it the player's. */
-  private addCar(team: 0 | 1, slot: number, botLevel: number | null): CarEntry {
+  private addCar(
+    team: 0 | 1,
+    slot: number,
+    botLevel: number | null,
+    role: BotRole = 'balanced',
+  ): CarEntry {
     const spawn = this.spawnFor(team, slot);
     const car = new Car(this.phys, this.spawnPosition(spawn), spawn.yaw, team);
     const mesh = createCarMesh(TEAM_COLOUR[team]);
@@ -158,7 +163,7 @@ export class Game {
       mesh,
       interp: new TransformInterpolator(mesh),
       flame: mesh.getObjectByName('flame') as THREE.Mesh,
-      bot: botLevel === null ? null : new Bot(car, botLevel),
+      bot: botLevel === null ? null : new Bot(car, botLevel, Math.random, role),
       spawn,
     };
     entry.interp.snap(car.position, car.body.rotation());
@@ -210,7 +215,7 @@ export class Game {
       this.rebuiltArena = needsArenaRebuild(spec.modifiers);
     }
 
-    this.setOpponents(spec.opponents, spec.tier);
+    this.setOpponents(spec.lineup);
     this.syncConfig();
     this.runHud.showOwned(this.run.upgrades);
 
@@ -236,18 +241,29 @@ export class Game {
     this.render.scene.add(this.arenaMesh);
   }
 
-  /** Adds or removes bot cars so the count matches, and sets their tier. */
-  private setOpponents(count: number, tier: number): void {
-    const bots = this.entries.filter((e) => e.bot !== null);
-    for (let i = bots.length; i < count; i++) this.addCar(1, i, tier);
-    for (let i = bots.length; i > count; i--) {
+  /** Matches the opposition to the round's lineup: count, tiers and roles. */
+  private setOpponents(lineup: readonly RoundOpponent[]): void {
+    const existing = this.entries.filter((e) => e.bot !== null).length;
+    for (let i = existing; i < lineup.length; i++) {
+      const spot = lineup[i]!;
+      this.addCar(1, i, spot.tier, spot.role);
+    }
+    for (let i = existing; i > lineup.length; i--) {
       const entry = this.entries.pop();
       if (!entry) break;
       this.byCollider.delete(entry.car.collider.handle);
       this.render.scene.remove(entry.mesh);
       entry.car.destroy();
     }
-    for (const entry of this.entries) entry.bot?.setLevel(tier);
+    // Re-stamp tier and role on everyone, since cars are reused across rounds.
+    let i = 0;
+    for (const entry of this.entries) {
+      if (!entry.bot) continue;
+      const spot = lineup[i++];
+      if (!spot) continue;
+      entry.bot.setLevel(spot.tier);
+      entry.bot.setRole(spot.role);
+    }
   }
 
   private onGoal(event: GoalEvent): void {

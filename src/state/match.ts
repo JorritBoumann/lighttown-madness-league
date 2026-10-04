@@ -26,6 +26,23 @@ export interface MatchRules {
   countdown: number;
   goalPause: number;
   suddenDeath: boolean;
+  /**
+   * What the player has to do to clear the round.
+   *
+   * - `goals`: the ordinary thing. Outscore them, sudden death if level.
+   * - `target`: reach `goalTarget` or fail. Leading at full time is not enough,
+   *   which is what lets a boss say "score three past this keeper" and mean it.
+   * - `survive`: cannot be won by scoring at all. The player wins by reaching
+   *   full time without conceding `concedeLimit`.
+   */
+  objective: 'goals' | 'target' | 'survive';
+  /**
+   * Goals clear the player has to be ahead by. Only applies to the player; the
+   * opposition always needs one.
+   */
+  winMargin: number;
+  /** Conceding this many loses the round there and then. 0 disables it. */
+  concedeLimit: number;
 }
 
 export interface GoalEvent {
@@ -44,7 +61,7 @@ export interface MatchResult {
   score: readonly [number, number];
   /** Whether it was settled in sudden death. */
   overtime: boolean;
-  reason: 'goal-target' | 'time' | 'sudden-death';
+  reason: 'goal-target' | 'time' | 'sudden-death' | 'conceded' | 'survived' | 'target-missed';
 }
 
 export interface MatchHandlers {
@@ -70,6 +87,9 @@ export function defaultRules(): MatchRules {
     countdown: cfg.match.countdown,
     goalPause: cfg.match.goalPause,
     suddenDeath: cfg.match.suddenDeath,
+    objective: 'goals',
+    winMargin: 1,
+    concedeLimit: 0,
   };
 }
 
@@ -192,9 +212,10 @@ export class Match {
     const conceding: Team = team === 0 ? 1 : 0;
     const ownGoal = this.lastTouch === conceding;
 
-    const decisive =
-      this.overtime ||
-      (this.rules.goalTarget > 0 && this.score[team] >= this.rules.goalTarget);
+    // Conceding past the limit ends it immediately, whatever else is true.
+    const concededOut =
+      this.rules.concedeLimit > 0 && this.score[1] >= this.rules.concedeLimit;
+    const decisive = concededOut || this.isDecisiveFor(team);
 
     const event: GoalEvent = {
       team,
@@ -205,6 +226,10 @@ export class Match {
     this.goals.push(event);
     this.handlers.onGoal?.(event);
 
+    if (concededOut) {
+      this.end({ winner: 1, score: event.score, overtime: this.overtime, reason: 'conceded' });
+      return;
+    }
     if (decisive) {
       this.end({
         winner: team,
@@ -219,8 +244,45 @@ export class Match {
     this.phaseTimer = this.rules.goalPause;
   }
 
+  /** Whether this team's latest goal settles the match. */
+  private isDecisiveFor(team: Team): boolean {
+    if (this.overtime) return true;
+    // Scoring cannot win a survival round; only the clock can.
+    if (this.rules.objective === 'survive') return false;
+    // When the target is the objective it belongs to the player alone. The
+    // opposition wins such a round on the clock or on the concede limit, not by
+    // matching a tally meant for the player.
+    if (this.rules.objective === 'target' && team === 1) return false;
+    if (this.rules.goalTarget <= 0) return false;
+    const mine = this.score[team];
+    const theirs = this.score[team === 0 ? 1 : 0];
+    const margin = team === 0 ? this.rules.winMargin : 1;
+    return mine >= this.rules.goalTarget && mine - theirs >= margin;
+  }
+
   private finishOnTime(): void {
     const [a, b] = this.score;
+
+    // Surviving to full time *is* the win. Getting here means the concede limit
+    // was never reached, because that ends the round the moment it happens.
+    if (this.rules.objective === 'survive') {
+      this.end({ winner: 0, score: [a, b], overtime: false, reason: 'survived' });
+      return;
+    }
+
+    // The target is the objective: leading is not enough, and falling short at
+    // full time is a loss rather than a draw.
+    if (this.rules.objective === 'target') {
+      const met = a >= this.rules.goalTarget && a - b >= this.rules.winMargin;
+      this.end({
+        winner: met ? 0 : 1,
+        score: [a, b],
+        overtime: false,
+        reason: met ? 'goal-target' : 'target-missed',
+      });
+      return;
+    }
+
     if (a === b) {
       if (this.rules.suddenDeath) {
         this.overtime = true;
