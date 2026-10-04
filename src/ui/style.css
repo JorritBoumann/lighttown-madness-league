@@ -349,3 +349,112 @@ html, body {
 }
 .boss-brief[hidden] { display: none !important; }
 .boss-brief:empty { display: none; }
+
+/* --- Menu screens --- */
+.menu-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 6, 12, 0.78);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+.menu-screen[hidden] { display: none !important; }
+
+.menu-panel {
+  width: min(560px, 88vw);
+  padding: 34px 40px 30px;
+  border-radius: 12px;
+  background: rgba(10, 14, 24, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.65);
+}
+.menu-title {
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+.menu-subtitle {
+  margin-top: 6px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+.menu-subtitle[hidden], .menu-body[hidden], .menu-footer[hidden] { display: none; }
+
+.menu-body {
+  margin-top: 20px;
+  font-size: 13px;
+  line-height: 1.75;
+  opacity: 0.85;
+}
+.menu-body dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 16px; }
+.menu-body dt { opacity: 0.55; }
+.menu-body dd { font-variant-numeric: tabular-nums; }
+.menu-body .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.menu-body .chips i {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: rgba(79, 195, 247, 0.16);
+  border: 1px solid rgba(79, 195, 247, 0.34);
+  color: #a9ddf8;
+}
+.menu-body .best { color: #ffc14d; }
+
+.menu-list { list-style: none; margin-top: 24px; }
+.menu-list li {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  margin: 0 -12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.menu-list li.on {
+  background: rgba(79, 195, 247, 0.14);
+  border-color: rgba(79, 195, 247, 0.4);
+}
+.menu-key {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  font-weight: 650;
+}
+.menu-list li.on .menu-key { background: rgba(79, 195, 247, 0.35); }
+.menu-label { font-size: 16px; font-weight: 600; }
+.menu-hint {
+  grid-column: 2;
+  font-size: 12px;
+  opacity: 0.6;
+  line-height: 1.5;
+}
+.menu-footer {
+  margin-top: 22px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.45;
+}
+
+/* The title and summary screens hide the gameplay HUD behind them: a
+   scoreboard and a round number describing a round nobody is playing read as a
+   bug. The pause screen keeps it, so you can see what you are returning to. */
+#ui.menu-open .hud-layer,
+#ui.menu-open .run-layer,
+#ui.menu-open .match-hud { display: none; }
+
+/* Free play: no clock, no opposition, so no scoreboard and no countdown. */
+#ui.free-play .match-hud { display: none; }

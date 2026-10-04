@@ -20,6 +20,8 @@ export class ChaseCamera {
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
   private fov = cfg.camera.fov;
+  /** Decaying shake amplitude, in world units. */
+  private shake = 0;
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {}
 
@@ -101,6 +103,14 @@ export class ChaseCamera {
     }
 
     this.camera.position.copy(this.pos);
+    if (this.shake > 0) {
+      // Applied to the camera rather than the stored position, so the shake
+      // decays on its own instead of fighting the follow.
+      this.camera.position.x += (Math.random() * 2 - 1) * this.shake;
+      this.camera.position.y += (Math.random() * 2 - 1) * this.shake;
+      this.camera.position.z += (Math.random() * 2 - 1) * this.shake;
+      this.shake = Math.max(0, this.shake - this.shake * 6 * dt - 2 * dt);
+    }
     this.camera.lookAt(this.look);
 
     // Nudge field of view with speed, for a sense of acceleration.
@@ -112,10 +122,16 @@ export class ChaseCamera {
     }
   }
 
+  /** Kicks the camera. `strength` is in world units before the config scale. */
+  kick(strength: number): void {
+    this.shake = Math.min(90, this.shake + strength * cfg.camera.shake);
+  }
+
   snapTo(carPos: { x: number; y: number; z: number }, forward: THREE.Vector3): void {
     this.pos
       .set(carPos.x, carPos.y + cfg.camera.height, carPos.z)
       .addScaledVector(this.tmp.set(forward.x, 0, forward.z).normalize(), -cfg.camera.distance);
     this.look.set(carPos.x, carPos.y, carPos.z);
+    this.shake = 0;
   }
 }

@@ -11,11 +11,12 @@ export class Hud {
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
+    this.root.className = 'hud-layer';
     this.root.innerHTML = `
       <div class="hud-help">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive &middot; in air: <kbd>W</kbd>/<kbd>S</kbd> pitch, <kbd>A</kbd>/<kbd>D</kbd> yaw</div>
         <div><kbd>Space</kbd> jump (hold for height, tap again to flip) &middot; <kbd>Shift</kbd> boost</div>
-        <div><kbd>Q</kbd>/<kbd>E</kbd> air roll &middot; <kbd>C</kbd> powerslide &middot; <kbd>T</kbd> ball cam &middot; <kbd>R</kbd> restart match &middot; <kbd>P</kbd> tuning</div>
+        <div><kbd>Q</kbd>/<kbd>E</kbd> air roll &middot; <kbd>C</kbd> powerslide &middot; <kbd>T</kbd> ball cam &middot; <kbd>M</kbd> mute &middot; <kbd>P</kbd> tuning &middot; <kbd>Esc</kbd> pause</div>
       </div>
       <div class="hud-flags">
         <i data-flag="ground">Ground</i>

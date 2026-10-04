@@ -20,12 +20,15 @@ import { MatchHud } from './ui/matchHud';
 import { TweakPanel } from './ui/tweakPanel';
 import { Match, type GoalEvent, type MatchResult } from './state/match';
 import { Run, type RunSummary } from './state/run';
-import type { RoundSpec, RoundOpponent } from './state/round';
+import { buildRound, type RoundSpec, type RoundOpponent } from './state/round';
 import { ConfigOverrides } from './state/configOverride';
 import { needsArenaRebuild } from './state/modifiers';
 import { applyUpgrades, type Upgrade } from './state/upgrades';
 import { resetModifiers } from './physics/car';
 import { RunHud } from './ui/runHud';
+import { Shell, type Screen } from './ui/shell';
+import { Particles } from './render/particles';
+import { Sound } from './audio/sound';
 
 /**
  * Wires the systems together: physics, rendering, input, AI, match flow, run.
@@ -50,6 +53,12 @@ interface CarEntry {
 const SPAWN_ORDER = [4, 2, 3, 0, 1];
 
 const TEAM_COLOUR = { 0: 0x4fc3f7, 1: 0xff7043 } as const;
+
+const IMPACT_COLOUR = new THREE.Color(0xfff2d0);
+const GOAL_COLOUR_BLUE = new THREE.Color(0x7fd4ff);
+const GOAL_COLOUR_ORANGE = new THREE.Color(0xffa070);
+const TRAIL_COLOUR_BLUE = new THREE.Color(0xffc14d);
+const TRAIL_COLOUR_ORANGE = new THREE.Color(0xff8a50);
 
 export class Game {
   private readonly phys: PhysicsWorld;
@@ -77,6 +86,9 @@ export class Game {
   private readonly hud: Hud;
   private readonly matchHud: MatchHud;
   private readonly runHud: RunHud;
+  private readonly shell: Shell;
+  private readonly particles = new Particles();
+  private readonly sound = new Sound();
   private readonly panel: TweakPanel;
   private readonly loop: Loop;
 
@@ -84,6 +96,14 @@ export class Game {
   private run: Run;
   /** Set to make a run's modifier picks repeatable; see restartRun. */
   private runSeed: number | null = null;
+  /** Which screen the player is looking at. */
+  private screen: Screen = 'title';
+  /** True while free play is running instead of a gauntlet round. */
+  private freePlay = false;
+  /** Last countdown number announced, so the beep fires once per number. */
+  private lastCountdownBeep = -1;
+  /** Tracks supersonic, so the whoosh fires on crossing rather than per frame. */
+  private wasSupersonic = false;
   /** Round modifiers. Reverted and re-applied every round. */
   private readonly roundOverrides = new ConfigOverrides();
   /**
@@ -95,8 +115,12 @@ export class Game {
   /** Stands in for the keyboard while `advance()` drives the game. */
   private inputOverride: Partial<CarInput> | null = null;
   private time = 0;
+  private readonly scratch = new THREE.Vector3();
+
+  private readonly ui: HTMLElement;
 
   private constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
+    this.ui = ui;
     this.phys = new PhysicsWorld();
     this.arena = createArena(this.phys);
     this.ball = new Ball(this.phys);
@@ -108,7 +132,7 @@ export class Game {
     this.chase = new ChaseCamera(this.render.camera);
     this.ballMesh = createBallMesh();
     this.padVisuals = createBoostPadVisuals(this.pads.pads);
-    this.render.scene.add(this.ballMesh, this.padVisuals.group);
+    this.render.scene.add(this.ballMesh, this.padVisuals.group, this.particles.points);
     this.ballInterp = new TransformInterpolator(this.ballMesh);
     this.ballInterp.snap(this.ball.position, this.ball.body.rotation());
 
@@ -118,12 +142,17 @@ export class Game {
     this.hud = new Hud(ui);
     this.matchHud = new MatchHud(ui);
     this.runHud = new RunHud(ui);
+    this.shell = new Shell(ui);
     this.panel = new TweakPanel(ui);
     this.panel.onChange(() => this.syncConfig());
 
     this.run = this.makeRun();
     this.runHud.showBest(this.run.best);
-    this.run.start();
+    // The game opens on the title screen rather than mid-round: a run should
+    // start because the player asked for one.
+    this.applyRound(buildRound(1, Math.random));
+    this.shell.showTitle(this.run.best, this.sound.muted);
+    this.syncHudVisibility();
     this.chase.snapTo(this.player.car.position, this.player.car.forward());
 
     this.loop = new Loop(
@@ -268,6 +297,16 @@ export class Game {
 
   private onGoal(event: GoalEvent): void {
     this.matchHud.goal(event);
+    const forPlayer = event.team === 0;
+    this.sound.goal(forPlayer);
+    this.chase.kick(26);
+    this.particles.burst(this.ball.position, 90, {
+      colour: forPlayer ? GOAL_COLOUR_BLUE : GOAL_COLOUR_ORANGE,
+      speed: 1600,
+      size: 40,
+      life: 1.1,
+      gravity: -500,
+    });
   }
 
   private onMatchEnd(result: MatchResult): void {
@@ -302,7 +341,8 @@ export class Game {
     const phase = this.match.phase;
     // Only 'playing' hands control over. The countdown holds everyone on their
     // line; after a goal the ball keeps rolling for show but nobody drives.
-    const driving = phase === 'playing' && this.run.phase === 'round';
+    const live = this.screen === 'playing';
+    const driving = live && (this.freePlay || (phase === 'playing' && this.run.phase === 'round'));
 
     const world = {
       ball: {
@@ -331,7 +371,9 @@ export class Game {
       this.keyboard.read();
     }
 
-    if (phase === 'countdown' || phase === 'ended' || this.run.phase !== 'round') {
+    const frozen =
+      !live || (!this.freePlay && (phase === 'countdown' || phase === 'ended' || this.run.phase !== 'round'));
+    if (frozen) {
       for (const entry of this.entries) this.freeze(entry.car.body);
       this.freeze(this.ball.body);
     }
@@ -342,12 +384,25 @@ export class Game {
       cars.push(entry.car);
     }
     this.ball.update();
-    if (driving) this.pads.update(dt, cars);
+    if (driving) {
+      this.pads.update(dt, cars);
+      for (const picked of this.pads.justPicked) {
+        this.sound.pad(picked.pad.big);
+        this.particles.burst({ x: picked.pad.x, y: 40, z: picked.pad.z }, picked.pad.big ? 18 : 8, {
+          colour: TRAIL_COLOUR_BLUE,
+          speed: 420,
+          size: 24,
+          life: 0.45,
+        });
+      }
+    }
 
     this.phys.step();
     this.drainContactEvents();
 
-    this.match.update(dt, { position: this.ball.position, radius: cfg.ball.radius });
+    if (live && !this.freePlay) {
+      this.match.update(dt, { position: this.ball.position, radius: cfg.ball.radius });
+    }
   }
 
   /** Car-on-ball touches get the speed-dependent bounce, and set last touch. */
@@ -362,7 +417,24 @@ export class Game {
       this.carBall.apply(entry.car, this.ball);
       // Needed to tell an own goal from a goal.
       this.match.touch(entry.car.team);
+      this.onBallTouched(entry);
     });
+  }
+
+  /** Sound and sparks for a car-on-ball touch, scaled by how hard it was. */
+  private onBallTouched(entry: CarEntry): void {
+    const cv = entry.car.velocity;
+    const bv = this.ball.velocity;
+    const closing = Math.hypot(cv.x - bv.x, cv.y - bv.y, cv.z - bv.z);
+    this.sound.hit(closing);
+    this.particles.burst(this.ball.position, closing > 900 ? 16 : 8, {
+      colour: IMPACT_COLOUR,
+      speed: 200 + closing * 0.3,
+      size: 26,
+      life: 0.35,
+    });
+    // Only the player's own touches shake the view, or a scrum is unreadable.
+    if (!entry.bot) this.chase.kick(Math.min(14, closing / 220));
   }
 
   /** Holds a body still, for the countdown and after full time. */
@@ -379,10 +451,19 @@ export class Game {
       entry.interp.apply(alpha);
       const boosting = entry.car.input.boost && entry.car.boost > 0;
       entry.flame.visible = boosting;
-      if (boosting) entry.flame.scale.setScalar(0.8 + Math.random() * 0.4);
+      if (boosting) {
+        entry.flame.scale.setScalar(0.8 + Math.random() * 0.4);
+        this.emitBoostTrail(entry, dt);
+      }
     }
     this.ballInterp.apply(alpha);
     this.padVisuals.sync(this.pads.pads, this.time);
+    this.particles.setProjection(
+      this.render.renderer.domElement.clientHeight || window.innerHeight,
+      this.render.camera.fov,
+    );
+    this.particles.update(dt);
+    this.updateContinuousAudio();
 
     const player = this.player;
     this.chase.update(
@@ -403,20 +484,208 @@ export class Game {
   }
 
   private handleHotkeys(): void {
+    // Any keypress is a gesture, which is what an AudioContext needs.
+    if (this.keyboard.anyPressed) this.sound.unlock();
+
+    if (this.shell.visible) {
+      this.handleMenuKeys();
+      return;
+    }
+
+    if (this.keyboard.wasPressed('Escape')) {
+      this.pause();
+      return;
+    }
     if (this.keyboard.wasPressed('KeyT')) this.chase.toggleBallCam();
     if (this.keyboard.wasPressed('KeyP')) this.panel.toggle();
-    if (this.keyboard.wasPressed('KeyR')) this.restartRun();
+    if (this.keyboard.wasPressed('KeyM')) this.sound.toggleMute();
     if (this.keyboard.wasPressed('KeyB')) this.ball.reset();
 
     // Between rounds, 1 to 3 take an upgrade. The run waits rather than being
     // timed out: the pick is the player's, and nothing is lost by waiting.
-    if (this.run.phase === 'between') {
+    if (!this.freePlay && this.run.phase === 'between') {
       for (let i = 0; i < 3; i++) {
         if (this.keyboard.wasPressed(`Digit${i + 1}`)) {
           this.pickUpgrade(i);
           break;
         }
       }
+    }
+  }
+
+  // --- screens -----------------------------------------------------------
+
+  private handleMenuKeys(): void {
+    if (this.keyboard.wasPressed('ArrowUp')) {
+      this.shell.move(-1);
+      this.sound.menuMove();
+    }
+    if (this.keyboard.wasPressed('ArrowDown')) {
+      this.shell.move(1);
+      this.sound.menuMove();
+    }
+    for (let i = 1; i <= 4; i++) {
+      if (this.keyboard.wasPressed(`Digit${i}`)) {
+        const id = this.shell.pick(i);
+        if (id) {
+          this.sound.menuSelect();
+          this.choose(id);
+        }
+        return;
+      }
+    }
+    if (this.keyboard.wasPressed('Enter') || this.keyboard.wasPressed('Space')) {
+      const id = this.shell.selectedId;
+      if (id) {
+        this.sound.menuSelect();
+        this.choose(id);
+      }
+      return;
+    }
+    // Esc resumes from the pause menu, which is where it was pressed.
+    if (this.keyboard.wasPressed('Escape') && this.screen === 'paused') this.choose('resume');
+  }
+
+  /** Acts on a menu item. The shell reports the choice; this one makes it. */
+  private choose(id: string): void {
+    switch (id) {
+      case 'start':
+      case 'again':
+        this.beginRun();
+        return;
+      case 'freeplay':
+        this.beginFreePlay();
+        return;
+      case 'resume':
+        this.screen = 'playing';
+        this.shell.hide();
+        this.syncHudVisibility();
+        return;
+      case 'restart':
+        this.beginRun();
+        return;
+      case 'quit':
+        this.toTitle();
+        return;
+      case 'mute': {
+        const muted = this.sound.toggleMute();
+        // Redraw the screen so the label matches.
+        if (this.screen === 'title') this.shell.showTitle(this.run.best, muted);
+        else if (this.screen === 'paused') this.shell.showPause(this.roundLabel, muted);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Hides the gameplay HUD behind the title and summary screens, where a
+   * scoreboard and a round number are describing a round nobody is playing.
+   * The pause screen keeps it, so you can see the state you are returning to.
+   */
+  private syncHudVisibility(): void {
+    const hide = this.screen === 'title' || this.screen === 'summary';
+    this.ui.classList.toggle('menu-open', hide);
+    // Free play has no clock and no opposition, so a scoreboard and a frozen
+    // countdown would both be describing something that is not happening.
+    this.ui.classList.toggle('free-play', this.freePlay);
+  }
+
+  private get roundLabel(): string {
+    if (this.freePlay) return 'Free play';
+    const spec = this.run.spec;
+    return spec ? `Round ${spec.index} · ${spec.label}` : '';
+  }
+
+  private beginRun(): void {
+    this.freePlay = false;
+    this.screen = 'playing';
+    this.shell.hide();
+    this.particles.clear();
+    this.runHud.showBest(this.run.best);
+    this.syncHudVisibility();
+    this.run.start();
+  }
+
+  /** No clock, no opponents, no way to lose: somewhere to learn the car. */
+  private beginFreePlay(): void {
+    this.freePlay = true;
+    this.screen = 'playing';
+    this.shell.hide();
+    this.particles.clear();
+    const spec = buildRound(1, Math.random);
+    this.applyRound({ ...spec, lineup: [], opponents: 0, modifiers: [], label: 'Free play' });
+    this.runHud.freePlay();
+    this.syncHudVisibility();
+  }
+
+  private pause(): void {
+    if (this.screen !== 'playing') return;
+    this.screen = 'paused';
+    this.sound.setBoost(0);
+    this.shell.showPause(this.roundLabel, this.sound.muted);
+    this.syncHudVisibility();
+  }
+
+  private toTitle(): void {
+    this.screen = 'title';
+    this.freePlay = false;
+    this.sound.setBoost(0);
+    this.particles.clear();
+    this.shell.showTitle(this.run.best, this.sound.muted);
+    this.syncHudVisibility();
+  }
+
+  // --- effects -----------------------------------------------------------
+
+  /** Exhaust plume behind a boosting car. */
+  private emitBoostTrail(entry: CarEntry, dt: number): void {
+    const count = Math.min(6, Math.max(2, Math.round(dt * 420)));
+    const back = entry.car.forward(this.scratch).multiplyScalar(-1);
+    const p = entry.car.position;
+    const v = entry.car.velocity;
+    const exhaust = cfg.car.hitbox.length * 0.6;
+    for (let i = 0; i < count; i++) {
+      this.particles.emit({
+        position: {
+          x: p.x + back.x * exhaust,
+          y: p.y + back.y * exhaust + 4,
+          z: p.z + back.z * exhaust,
+        },
+        // Thrown backwards, but carrying some of the car's own speed so the
+        // plume streams behind rather than hanging where it was made.
+        velocity: {
+          x: back.x * 520 + v.x * 0.3,
+          y: back.y * 520 + v.y * 0.3,
+          z: back.z * 520 + v.z * 0.3,
+        },
+        colour: entry.bot ? TRAIL_COLOUR_ORANGE : TRAIL_COLOUR_BLUE,
+        size: 55,
+        life: 0.42,
+        spread: 90,
+        drag: 2.0,
+      });
+    }
+  }
+
+  /** Sounds that track state rather than events. */
+  private updateContinuousAudio(): void {
+    const car = this.player.car;
+    const live = this.screen === 'playing';
+    const boosting = live && car.input.boost && car.boost > 0;
+    this.sound.setBoost(boosting ? 0.5 + 0.5 * Math.min(1, car.speed / cfg.car.maxSpeed) : 0);
+
+    if (live && car.isSupersonic && !this.wasSupersonic) this.sound.supersonic();
+    this.wasSupersonic = car.isSupersonic;
+
+    // One beep per number of the countdown.
+    if (live && !this.freePlay && this.match.phase === 'countdown') {
+      const n = Math.ceil(this.match.countdownRemaining);
+      if (n !== this.lastCountdownBeep) {
+        this.lastCountdownBeep = n;
+        this.sound.countdown(n);
+      }
+    } else {
+      this.lastCountdownBeep = -1;
     }
   }
 
@@ -455,9 +724,11 @@ export class Game {
       onUpgradeTaken: (_upgrade: Upgrade, owned: readonly Upgrade[]) =>
         this.runHud.showOwned(owned),
       onRunOver: (summary: RunSummary) => {
-        this.runHud.runOver(summary);
         // The record may have just changed, so refresh the line that shows it.
         this.runHud.showBest(this.run.best);
+        this.screen = 'summary';
+        this.shell.showSummary(summary, this.run.upgrades, this.run.best);
+        this.syncHudVisibility();
       },
     };
     if (this.runSeed === null) return new Run(handlers);
@@ -488,33 +759,11 @@ export class Game {
     } finally {
       this.inputOverride = null;
     }
-    this.drawOnly(seconds);
-  }
-
-  /** Renders the current state without advancing physics. */
-  private drawOnly(dt: number): void {
-    for (const entry of this.entries) {
-      entry.interp.apply(1);
-      entry.flame.visible = entry.car.input.boost && entry.car.boost > 0;
-    }
-    this.ballInterp.apply(1);
-    this.padVisuals.sync(this.pads.pads, this.time);
-    const player = this.player;
-    this.chase.update(
-      dt,
-      player.mesh.position,
-      player.car.velocity,
-      player.car.forward(),
-      this.ballMesh.position,
-    );
-    // Hotkeys and the per-frame input reset run here too, so stepping the game
-    // with advance() goes through the same input path as a real frame.
-    this.handleHotkeys();
-    this.hud.update(player.car, this.chase.ballCam);
-    this.matchHud.update(this.match, dt);
-    this.runHud.update(this.run, dt);
-    this.keyboard.endFrame();
-    this.render.renderer.render(this.render.scene, this.render.camera);
+    // The real render path, so stepping the game cannot drift from playing it.
+    // Keeping a second cut-down version of this is how the boost trail, the
+    // hotkeys and the match update each went missing from scripted checks in
+    // turn; there is now only one.
+    this.renderFrame(seconds, 1);
   }
 
   /** Live view for the console and for scripted checks. */
@@ -530,6 +779,8 @@ export class Game {
     readonly run: Run;
     readonly overrides: ConfigOverrides;
     readonly runOverrides: ConfigOverrides;
+    readonly screen: Screen;
+    readonly freePlay: boolean;
   } {
     // Getters rather than a snapshot: the match is replaced on every restart,
     // and a held reference to the old one silently reports stale state.
@@ -567,6 +818,12 @@ export class Game {
       },
       get runOverrides() {
         return game.runOverrides;
+      },
+      get screen() {
+        return game.screen;
+      },
+      get freePlay() {
+        return game.freePlay;
       },
     };
   }

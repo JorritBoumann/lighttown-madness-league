@@ -310,6 +310,13 @@ export const config = {
     suddenDeath: true,
   },
 
+  audio: {
+    /** Overall volume. */
+    master: 0.5,
+    /** Boost thrust loop, relative to master. */
+    boost: 0.18,
+  },
+
   camera: {
     /** Rocket League's own camera defaults. */
     fov: 110,
@@ -324,6 +331,8 @@ export const config = {
     ballCamStiffness: 7,
     /** Extra distance pulled back at top speed, for a sense of pace. */
     speedDistanceGain: 60,
+    /** How hard the camera shakes on a goal or a heavy touch. */
+    shake: 1,
     speedFovGain: 8,
   },
 };

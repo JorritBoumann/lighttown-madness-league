@@ -28,6 +28,7 @@ export class RunHud {
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
+    this.root.className = 'run-layer';
     this.root.innerHTML = `
       <div class="round-strip">
         <div class="round-no" data-round>Round 1</div>
@@ -81,6 +82,18 @@ export class RunHud {
       this.pickerOptions.appendChild(option);
     }
     this.picker.hidden = false;
+  }
+
+  /** Free play has no round, no objective and no modifiers to show. */
+  freePlay(): void {
+    this.hideCard();
+    this.picker.hidden = true;
+    this.roundLabel.textContent = 'Free play';
+    this.roundLabel.classList.remove('boss');
+    this.roundSub.textContent = 'no clock · no opponents';
+    this.mods.innerHTML = '';
+    this.brief.hidden = true;
+    this.owned.innerHTML = '';
   }
 
   /** The upgrades held so far, stacked counts rolled up. */

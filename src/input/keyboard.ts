@@ -50,6 +50,11 @@ export class Keyboard {
     return this.pressedThisFrame.has(code);
   }
 
+  /** Any key at all went down this frame. Used to unlock audio. */
+  get anyPressed(): boolean {
+    return this.pressedThisFrame.size > 0;
+  }
+
   /** Call once per rendered frame, after reading the one-shot hotkeys. */
   endFrame(): void {
     this.pressedThisFrame.clear();
@@ -85,6 +90,7 @@ export class Keyboard {
 
 const SWALLOW = new Set([
   'Space',
+  'Enter',
   'Digit1',
   'Digit2',
   'Digit3',

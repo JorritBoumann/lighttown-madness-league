@@ -26,12 +26,13 @@ Build order from the brief, and what exists:
 | 4. Gauntlet structure and round escalation | Done |
 | 5. Upgrades between rounds | Done |
 | 6. Boss rounds | Done |
-| 7. Menus, run summary, polish | Next |
+| 7. Menus, run summary, polish | Done |
 
-A run is playable end to end: rounds that escalate, a boss every fifth round
-with its own rule set, an upgrade picked after each round, a loss that ends the
-run, and a best run that persists. What is left is presentation — menus, a
-proper run summary, sound and particles.
+All seven steps are in. The game opens on a title screen, a run escalates
+through rounds and bosses, upgrades are picked between them, a loss ends the run
+and shows a summary, and the best run persists.
+
+The known gaps are listed at the end.
 
 ## Controls
 
@@ -44,9 +45,10 @@ proper run summary, sound and particles.
 | `Q` / `E` | Air roll left / right |
 | `C` | Powerslide |
 | `T` | Ball cam |
-| `R` | Restart the match |
 | `B` | Reset the ball only |
 | `1` `2` `3` | Take the matching upgrade between rounds |
+| `Esc` | Pause |
+| `M` | Mute |
 | `P` | Tuning panel |
 
 ## Tuning
@@ -99,6 +101,47 @@ Own goals are attributed from the last touch and credited to the other side.
 the ball is and reports what happened, and the caller does the resetting. That
 is what makes it testable without a physics world, and it is why the gauntlet
 can drive it with whatever rules a round needs.
+
+## Screens
+
+Title, pause and run summary are the same keyboard menu overlay with different
+contents, in [`src/ui/shell.ts`](src/ui/shell.ts). The shell reports which item
+was chosen and nothing else; the game decides what that means, so screens change
+in one place. Arrows or number keys to move, Enter to select.
+
+**Free play** is on the title screen: no clock, no opponents, nothing to lose.
+It exists because judging how the car feels is its own task, and doing it inside
+a round that can be lost is a different experience.
+
+The title and summary screens hide the gameplay HUD behind them — a scoreboard
+and a round number describing a round nobody is playing read as a bug. The pause
+screen keeps it, so you can see the state you are returning to.
+
+## Sound and effects
+
+**Sound** ([`src/audio/sound.ts`](src/audio/sound.ts)) is synthesised with Web
+Audio rather than loaded from files. No assets to ship, and every sound scales
+with what caused it: a hit at 2000uu/s is a different noise from a nudge, which
+one fixed sample cannot be. Boost is a filtered noise loop held open and tracked
+to speed; hits are a low thump plus a noise crack, both weighted by closing
+speed; a goal rises for one scored and falls for one conceded.
+
+Browsers will not start an AudioContext without a gesture, so it is created
+lazily on the first keypress — which the title screen provides. Everything
+no-ops before then, and after any failure: a game that throws because audio is
+unavailable is worse than a quiet one.
+
+**Particles** ([`src/render/particles.ts`](src/render/particles.ts)) are one
+pooled point system for every effect — boost trails, impact sparks, goal
+bursts, pad pickups. A fixed pool written into a single buffer, so the whole
+lot is one draw call however much is happening and emitting never allocates.
+Dead particles are parked at zero size rather than removed, which keeps the
+buffers contiguous. The point size is computed from the viewport and field of
+view, so a particle of a given world size holds that size on screen.
+
+The camera takes a kick on goals and on the player's own heavy touches — only
+the player's, because a shake for every contact in a four-car scrum is
+unreadable.
 
 ## The gauntlet
 
@@ -292,7 +335,7 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-207 tests, no browser needed.
+229 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -321,6 +364,11 @@ leaves the ball able to fit through the goal, that no bot tier starts a match
 already hunting boost, that no upgrade touches a config path the bots read, and
 that re-applying a run's upgrades is idempotent.
 
+The menu and particle tests cover things that fail quietly: a pool that never
+frees anything simply stops showing new effects, which looks like the effect was
+never written. The sound tests check it stays silent and throws nothing with no
+AudioContext at all, since that is a real browser state and not a hypothetical.
+
 The bot is tested by what it achieves rather than what it intends: put it on the
 pitch with the real physics, seed its randomness so a flaky bot fails rather
 than fails occasionally, and check that it scores, defends, collects boost,
@@ -329,6 +377,25 @@ on itself. Three of them pin the strike geometry, since that was worth two
 wrong guesses to find: that a committed bot aims at the near side of the ball
 rather than past it, that it leads the shot to cancel a drifting ball, and that
 conversion stays ordered by tier.
+
+## Known gaps
+
+Honest list of what is not there, in rough order of how much it matters:
+
+- **Bots cannot play in the air.** An aerial is a jump at a high ball and
+  nothing more: a bot will not go up for a ball that needs real air play, and
+  cannot defend one. No boss leans on this, so it has not bitten, but it is the
+  largest remaining hole in the AI.
+- **No gamepad support.** The brief asked for keyboard first and gamepad
+  afterwards; the afterwards has not happened. `CarInput` is the single contract
+  every driver produces, so a pad is a new source rather than a change to
+  anything downstream.
+- **Finishing from wide angles is a coin flip at best** even at the top tier:
+  44% of randomised chances. See the AI section for the measurements.
+- **The bundle is 5MB** because `rapier3d-compat` inlines its WebAssembly as
+  base64. Fine for development; worth moving to the non-compat build with a wasm
+  loader before this is served to anyone.
+- **No replays, no camera options, no key rebinding.**
 
 ## Debugging
 
@@ -346,5 +413,7 @@ conversion stays ordered by tier.
   which is the only practical way to chase a bug that only shows up in one
   round's particular combination.
 - `game.pickUpgrade(i)` takes an offered upgrade without a keypress.
+- `game.debug.screen` and `.freePlay` say which screen is up, which is worth
+  having because "nothing is moving" has several possible causes.
 - `bot.reasoning` shows why a bot chose its current target — alignment, whether
   it is behind the ball, whether it has committed to a shot.
