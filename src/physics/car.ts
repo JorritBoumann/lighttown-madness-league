@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RAPIER, type PhysicsWorld, Group, groups } from './world';
 import { cfg } from '../config';
 import { clamp, sign } from '../core/mathx';
+import { FORWARD as FWD, UP, RIGHT } from '../core/axes';
 import { Curve } from '../core/curve';
 import type { CarInput } from '../input/types';
 import { emptyInput } from '../input/types';
@@ -23,13 +24,10 @@ import { emptyInput } from '../input/types';
  *  - per-axis air control with its own damping, roll far stronger than pitch
  *    and yaw, which is what makes air roll the backbone of air play
  *
- * Local axes: +x is forward (nose), +y is up (roof), +z is right.
+ * Local axes: +x is forward (nose), +y is up (roof), -z is the driver's right.
  * Units are Unreal Units throughout: see src/config.ts.
  */
 
-const FWD = new THREE.Vector3(1, 0, 0);
-const UP = new THREE.Vector3(0, 1, 0);
-const RIGHT = new THREE.Vector3(0, 0, 1);
 
 export interface CarModifiers {
   /** Multipliers applied on top of config, for upgrades and round modifiers. */
@@ -469,9 +467,13 @@ export class Car {
     if (this.dodgeLock <= 0) {
       // Config values are angular accelerations in rad/s^2: direct, predictable,
       // and independent of the inertia tensor.
-      this.angvel.addScaledVector(this.right, -inp.pitch * c.airPitchAccel * dt);
+      //
+      // Signs, derived from the axes above: spin about the driver's right pitches
+      // the nose down, so stick-forward is positive; spin about the nose rolls
+      // the car to its left, so rolling right is negative.
+      this.angvel.addScaledVector(this.right, inp.pitch * c.airPitchAccel * dt);
       this.angvel.addScaledVector(this.up, inp.steer * c.airYawAccel * dt);
-      this.angvel.addScaledVector(this.fwd, inp.roll * c.airRollAccel * dt);
+      this.angvel.addScaledVector(this.fwd, -inp.roll * c.airRollAccel * dt);
 
       // Per-axis damping, applied only where there is no input. Holding an axis
       // stays crisp; releasing it settles.

@@ -196,7 +196,66 @@ export const config = {
     hasCeiling: true,
   },
 
+  ai: {
+    /** How hard the bot turns toward its target. Higher is twitchier. */
+    steerGain: 2.6,
+    /** Beyond this angle off target the bot powerslides through the turn. */
+    powerslideAngle: 1.15,
+    /** Beyond this angle it backs off the throttle rather than driving wide. */
+    easeOffAngle: 1.9,
+    /** Badly misaligned and faster than this, the bot brakes instead of easing
+     *  off: scrubbing speed tightens the turn far more than coasting does,
+     *  because steering authority climbs as speed falls. */
+    brakeToTurnSpeed: 600,
+    /** Within this angle, and far enough out, it will boost. */
+    boostAngle: 0.3,
+    boostMinDistance: 900,
+    /** Ball this high and close gets a jump instead of a drive-through. */
+    jumpBallHeight: 260,
+    jumpRange: 420,
+    /** Close enough and square enough to flip into the ball for power. */
+    dodgeRange: 420,
+    dodgeAngle: 0.45,
+    dodgeMinSpeed: 900,
+    /** How far in front of its own goal a defending bot sits. */
+    defendStandoff: 1100,
+    /** Ball past this far into its own half makes a defender turn back. */
+    defendTrigger: 0.25,
+    /** Bots re-pick a boost pad no more often than this, to stop dithering. */
+    padRepickInterval: 0.8,
+    /** Ball within this range outranks any boost detour. */
+    collectBallGuard: 1800,
+    /** How near the ball a bot has to be for its attack to count as live and
+     *  so block a boost detour. Being nominally behind a ball on the far side
+     *  of the pitch is not a play, it is a jog, and boost is worth more. */
+    attackLiveRange: 3000,
+    /** Extra boost needed to *stop* collecting, so the decision does not flap
+     *  on and off as the meter crosses the threshold. */
+    collectHysteresis: 25,
+    /** How far behind the ball a bot lines up before committing to a shot. */
+    approachStandoff: 260,
+    /** How far past the ball it aims once committed, so it drives through. */
+    driveThrough: 140,
+    /** Sideways offset on the approach, so a bot that has overrun loops *round*
+     *  the ball to get behind it. Aiming straight at the point behind the ball
+     *  means driving through the ball again, knocking it the wrong way, which
+     *  turns into shepherding it sideways down the pitch for ever. */
+    approachSwing: 750,
+    /** How well lined up it has to be to commit: 1 is dead behind the ball,
+     *  0 is square on to it. Lower means it shoots from worse angles. */
+    commitAlignment: 0.6,
+    /** It also has to be this much further from the target goal than the ball
+     *  is. Direction alone is not enough: a bot level with the ball can point
+     *  roughly goalward, tap the ball sideways, and then shepherd it along the
+     *  pitch for ever without once getting behind it. */
+    commitBehindMargin: 150,
+  },
+
   match: {
+    /** How many bots line up against the player. */
+    opponents: 1,
+    /** Their difficulty tier: see src/ai/tiers.ts. */
+    opponentTier: 2,
     /** Match length in seconds. Gauntlet rounds sit in the 60-90 band. */
     durationSeconds: 90,
     /** Reaching this many goals wins there and then. 0 means time only. */

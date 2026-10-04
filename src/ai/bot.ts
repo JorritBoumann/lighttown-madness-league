@@ -1,0 +1,473 @@
+import * as THREE from 'three';
+import { cfg } from '../config';
+import { clamp } from '../core/mathx';
+import type { CarInput } from '../input/types';
+import { emptyInput } from '../input/types';
+import type { Car } from '../physics/car';
+import type { BoostPad } from '../physics/boostPads';
+import { FORWARD, UP, RIGHT, WORLD_UP } from '../core/axes';
+import { BallPredictor, type BallSnapshot } from './ballPrediction';
+import { tier, type BotTier } from './tiers';
+
+/**
+ * Opponent bot.
+ *
+ * Produces a CarInput, exactly like the keyboard does, so nothing downstream
+ * knows or cares that a car is driven by this rather than a player.
+ *
+ * The shape of it: pick a thing to go to (an interception, a defensive post, a
+ * boost pad), then run one steering controller that drives there. Keeping the
+ * "what" and the "how" apart is what stops the behaviour from turning into a
+ * pile of special cases.
+ */
+
+export type BotMode = 'attack' | 'defend' | 'collect' | 'recover';
+
+export interface BotWorld {
+  ball: BallSnapshot & { radius: number };
+  pads: readonly BoostPad[];
+}
+
+/** Ball states kept for the reaction delay. */
+interface Memory {
+  time: number;
+  snapshot: BallSnapshot;
+}
+
+export class Bot {
+  tier: BotTier;
+  mode: BotMode = 'attack';
+
+  private readonly input: CarInput = emptyInput();
+  private readonly predictor = new BallPredictor();
+  private readonly memory: Memory[] = [];
+  private clock = 0;
+
+  /** Current aim scatter, re-rolled on an interval. */
+  private aimOffset = 0;
+  private aimRolledAt = -Infinity;
+
+  /** The pad being collected, held for a moment to stop dithering. */
+  private targetPad: BoostPad | null = null;
+  private padPickedAt = -Infinity;
+
+  /** Scratch. */
+  private readonly target = new THREE.Vector3();
+  private readonly toTarget = new THREE.Vector3();
+  private readonly fwd = new THREE.Vector3();
+  private readonly right = new THREE.Vector3();
+  private readonly up = new THREE.Vector3();
+  private readonly q = new THREE.Quaternion();
+
+  constructor(
+    readonly car: Car,
+    level: number,
+    /** Deterministic for tests; defaults to Math.random. */
+    private readonly random: () => number = Math.random,
+  ) {
+    this.tier = tier(level);
+  }
+
+  setLevel(level: number): void {
+    this.tier = tier(level);
+  }
+
+  /** Which end this bot defends. */
+  private get ownGoalX(): number {
+    return this.car.team === 0 ? -cfg.arena.halfLength : cfg.arena.halfLength;
+  }
+
+  private get targetGoalX(): number {
+    return -this.ownGoalX;
+  }
+
+  /** Decides what to do and returns the input for this step. */
+  think(dt: number, world: BotWorld): CarInput {
+    this.clock += dt;
+    this.remember(world.ball);
+
+    const ball = this.recallBall();
+    const basis = this.readBasis();
+
+    // Upside down or sideways: do nothing but let the car right itself. Driving
+    // or boosting here just makes it worse.
+    if (basis.upness < 0.5 && !this.car.grounded) {
+      this.mode = 'recover';
+      return this.idle();
+    }
+
+    this.mode = this.chooseMode(ball, world);
+    switch (this.mode) {
+      case 'collect':
+        this.aimAtPad(world);
+        break;
+      case 'defend':
+        this.aimAtDefensivePost(ball);
+        break;
+      default:
+        this.aimAtBall(ball);
+        break;
+    }
+
+    this.clampToPitch();
+    return this.driveToTarget(ball);
+  }
+
+  // --- perception ---------------------------------------------------------
+
+  private remember(ball: BallSnapshot & { radius: number }): void {
+    this.memory.push({
+      time: this.clock,
+      snapshot: {
+        position: { ...ball.position },
+        velocity: { ...ball.velocity },
+      },
+    });
+    // Keep a little more than the delay needs.
+    const cutoff = this.clock - (this.tier.reactionDelay + 0.1);
+    while (this.memory.length > 1 && this.memory[0]!.time < cutoff) this.memory.shift();
+  }
+
+  /** The ball as the bot currently believes it to be: a little out of date. */
+  private recallBall(): BallSnapshot {
+    const wanted = this.clock - this.tier.reactionDelay;
+    // The buffer is short, so a scan is cheaper than anything clever.
+    for (let i = this.memory.length - 1; i >= 0; i--) {
+      if (this.memory[i]!.time <= wanted) return this.memory[i]!.snapshot;
+    }
+    return this.memory[0]!.snapshot;
+  }
+
+  private readBasis(): { upness: number } {
+    const r = this.car.body.rotation();
+    this.q.set(r.x, r.y, r.z, r.w);
+    this.fwd.copy(FORWARD).applyQuaternion(this.q);
+    this.right.copy(RIGHT).applyQuaternion(this.q);
+    this.up.copy(UP).applyQuaternion(this.q);
+    return { upness: this.up.dot(WORLD_UP) };
+  }
+
+  // --- deciding ----------------------------------------------------------
+
+  private chooseMode(ball: BallSnapshot, world: BotWorld): BotMode {
+    const t = this.tier;
+
+    if (t.defends) {
+      // Ball well into our own half and heading our way: get back.
+      const side = Math.sign(this.ownGoalX);
+      const depth = (ball.position.x / cfg.arena.halfLength) * side;
+      const closing = ball.velocity.x * side > 0;
+      const behindBall = (this.car.position.x - ball.position.x) * side < 0;
+      if (depth > cfg.ai.defendTrigger && closing && behindBall) return 'defend';
+    }
+
+    if (t.managesBoost) {
+      const p = this.car.position;
+      const toBall = Math.hypot(ball.position.x - p.x, ball.position.z - p.z);
+
+      // An attack already developing outranks needing boost. Without this the
+      // bot boosts, drops under its low mark, abandons the attack for a pad,
+      // tops up, boosts again and repeats: it spends the match pad-hunting and
+      // barely plays. Being behind the ball is the cheap test for "this is my
+      // play", and it is the same test the shot itself uses.
+      const botToGoal = Math.hypot(this.targetGoalX - p.x, p.z);
+      const ballToGoal = Math.hypot(this.targetGoalX - ball.position.x, ball.position.z);
+      const attackLive = botToGoal > ballToGoal && toBall < cfg.ai.attackLiveRange;
+
+      // Needing boost never outranks a ball that is right there, either.
+      if (!attackLive && toBall > cfg.ai.collectBallGuard) {
+        // Hysteresis: it takes more boost to stop collecting than to start, or
+        // the decision flaps on and off as the meter crosses the threshold and
+        // the bot drives back and forth between a pad and the ball.
+        const threshold =
+          this.mode === 'collect' ? t.boostLowMark + cfg.ai.collectHysteresis : t.boostLowMark;
+        if (this.car.boost < threshold) {
+          const pad = this.pickPad(world, ball);
+          if (pad) {
+            this.targetPad = pad;
+            return 'collect';
+          }
+        }
+      }
+    }
+
+    this.targetPad = null;
+    return 'attack';
+  }
+
+  /**
+   * A pad worth the detour: live, roughly on the way to the ball, and not
+   * miles off. Re-picked on an interval so the bot does not flip between two
+   * pads and drive between them.
+   */
+  private pickPad(world: BotWorld, ball: BallSnapshot): BoostPad | null {
+    if (
+      this.targetPad &&
+      this.targetPad.cooldown <= 0 &&
+      this.clock - this.padPickedAt < cfg.ai.padRepickInterval
+    ) {
+      return this.targetPad;
+    }
+
+    const p = this.car.position;
+    let best: BoostPad | null = null;
+    let bestCost = Infinity;
+    for (const pad of world.pads) {
+      if (pad.cooldown > 0) continue;
+      const toPad = Math.hypot(pad.x - p.x, pad.z - p.z);
+      const padToBall = Math.hypot(ball.position.x - pad.x, ball.position.z - pad.z);
+      // Prefer pads that are close and do not send us away from the ball. Big
+      // pads are worth a longer trip.
+      const cost = toPad + padToBall * 0.6 - (pad.big ? 1800 : 0);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = pad;
+      }
+    }
+    if (best) this.padPickedAt = this.clock;
+    return best;
+  }
+
+  // --- choosing a target -------------------------------------------------
+
+  private aimAtBall(ball: BallSnapshot): void {
+    const t = this.tier;
+    const a = cfg.ai;
+    const hit = this.interceptPoint(ball);
+    const p = this.car.position;
+
+    // Direction we want to send the ball.
+    const goalDx = this.targetGoalX - hit.x;
+    const goalDz = 0 - hit.z;
+    const goalLen = Math.hypot(goalDx, goalDz) || 1;
+    const gx = goalDx / goalLen;
+    const gz = goalDz / goalLen;
+
+    // How well placed we already are: 1 means sitting directly behind the ball
+    // with the goal beyond it, 0 means square on to the line of the shot.
+    const toHitX = hit.x - p.x;
+    const toHitZ = hit.z - p.z;
+    const toHitLen = Math.hypot(toHitX, toHitZ) || 1;
+    const alignment = (toHitX / toHitLen) * gx + (toHitZ / toHitLen) * gz;
+
+    // Being further from the goal than the ball is what makes driving forward
+    // push it goalward rather than across.
+    const goalZ = 0;
+    const botToGoal = Math.hypot(this.targetGoalX - p.x, goalZ - p.z);
+    const ballToGoal = Math.hypot(this.targetGoalX - hit.x, goalZ - hit.z);
+    const behindBall = botToGoal > ballToGoal + a.commitBehindMargin;
+
+    this.reasoning.alignment = alignment;
+    this.reasoning.behindBall = behindBall;
+    this.reasoning.committed = alignment > a.commitAlignment && behindBall;
+
+    if (this.reasoning.committed) {
+      // Lined up: commit, and aim *past* the ball so we drive through it rather
+      // than pulling up next to it. This is what turns a nudge into a shot.
+      this.target.set(hit.x + gx * a.driveThrough, hit.y, hit.z + gz * a.driveThrough);
+    } else {
+      // Not lined up: loop round to the far side of the ball from the goal.
+      // The waypoint is swung out to whichever side the car is already on, so
+      // the path curves around the ball instead of straight back through it.
+      const perpX = -gz;
+      const perpZ = gx;
+      const sideways = (p.x - hit.x) * perpX + (p.z - hit.z) * perpZ;
+      const side = sideways >= 0 ? 1 : -1;
+      this.target.set(
+        hit.x - gx * a.approachStandoff + perpX * side * a.approachSwing,
+        hit.y,
+        hit.z - gz * a.approachStandoff + perpZ * side * a.approachSwing,
+      );
+    }
+
+    // Scatter the aim sideways, re-rolled on an interval so it reads as a
+    // player hitting the ball off-centre rather than as jitter.
+    if (t.aimError > 0) {
+      if (this.clock - this.aimRolledAt > t.aimErrorInterval) {
+        this.aimOffset = (this.random() * 2 - 1) * t.aimError;
+        this.aimRolledAt = this.clock;
+      }
+      const dx = this.target.x - p.x;
+      const dz = this.target.z - p.z;
+      const len = Math.hypot(dx, dz) || 1;
+      // Perpendicular to the approach, so the error moves the strike across the
+      // ball rather than short or long of it.
+      this.target.x += (-dz / len) * this.aimOffset;
+      this.target.z += (dx / len) * this.aimOffset;
+    }
+  }
+
+  /**
+   * Earliest point on the ball's path the car could plausibly get to.
+   * Walks the prediction and takes the first sample it can reach in time.
+   */
+  private interceptPoint(ball: BallSnapshot): { x: number; y: number; z: number } {
+    const horizon = this.tier.predictionHorizon;
+    if (horizon <= 0) return ball.position;
+
+    const samples = this.predictor.predict(ball, horizon);
+    const p = this.car.position;
+    const speed = Math.max(this.car.speed, 500);
+
+    for (const sample of samples) {
+      const distance = Math.hypot(sample.position.x - p.x, sample.position.z - p.z);
+      // Rough: current speed plus some of the acceleration still available.
+      const reachable = speed * sample.time + 0.5 * 900 * sample.time * sample.time;
+      if (reachable >= distance) return sample.position;
+    }
+    // Nothing on the path is reachable in time. Chase where the ball is now:
+    // falling back to the furthest future sample sends the bot sprinting at a
+    // spot it has already been shown it cannot make, which is how a bot ends up
+    // running away from the play.
+    return ball.position;
+  }
+
+  /** Keeps a waypoint on the pitch, so the bot never aims into a wall. */
+  private clampToPitch(): void {
+    const margin = cfg.car.hitbox.length;
+    const hl = cfg.arena.halfLength - margin;
+    const hw = cfg.arena.halfWidth - margin;
+    this.target.x = clamp(this.target.x, -hl, hl);
+    this.target.z = clamp(this.target.z, -hw, hw);
+  }
+
+  /** Sits between the ball and its own net. */
+  private aimAtDefensivePost(ball: BallSnapshot): void {
+    const goalX = this.ownGoalX;
+    const dx = ball.position.x - goalX;
+    const dz = ball.position.z - 0;
+    const len = Math.hypot(dx, dz) || 1;
+    const standoff = Math.min(cfg.ai.defendStandoff, len * 0.6);
+    this.target.set(goalX + (dx / len) * standoff, 0, (dz / len) * standoff);
+  }
+
+  private aimAtPad(world: BotWorld): void {
+    const pad = this.targetPad;
+    if (!pad) {
+      this.target.set(0, 0, 0);
+      return;
+    }
+    void world;
+    this.target.set(pad.x, 0, pad.z);
+  }
+
+  // --- driving -----------------------------------------------------------
+
+  /** One steering controller, whatever the target is. */
+  private driveToTarget(ball: BallSnapshot): CarInput {
+    const a = cfg.ai;
+    const t = this.tier;
+    const i = this.input;
+    Object.assign(i, emptyInput());
+
+    const p = this.car.position;
+    this.toTarget.set(this.target.x - p.x, 0, this.target.z - p.z);
+    const distance = this.toTarget.length();
+
+    // Angle to the target in the car's own frame.
+    const forwardDot = this.toTarget.dot(this.fwd);
+    const rightDot = this.toTarget.dot(this.right);
+    const angle = Math.atan2(rightDot, forwardDot);
+    const absAngle = Math.abs(angle);
+    this.reasoning.targetAngle = angle;
+    this.reasoning.distance = distance;
+
+    i.steer = clamp(angle * a.steerGain, -1, 1);
+
+    // Throttle: full ahead unless the target is well off to the side, in which
+    // case easing off tightens the turn instead of driving a wide arc.
+    if (absAngle > Math.PI - 0.5 && distance < 700) {
+      // Target is behind and close: reverse out rather than loop round.
+      i.throttle = -1;
+      i.steer = -i.steer;
+    } else if (absAngle > a.easeOffAngle) {
+      // Braking rather than coasting: steering authority climbs sharply as
+      // speed falls, so scrubbing speed turns the car round far faster than
+      // arcing round at pace, which is an endless circle.
+      i.throttle = this.car.speed > a.brakeToTurnSpeed ? -1 : 0.6 * t.throttleCap;
+    } else {
+      i.throttle = t.throttleCap;
+    }
+
+    if (t.usesPowerslide && absAngle > a.powerslideAngle && this.car.speed > 700) {
+      i.drift = true;
+    }
+
+    if (
+      t.usesBoost &&
+      this.car.boost > t.boostReserve &&
+      absAngle < a.boostAngle &&
+      distance > a.boostMinDistance &&
+      this.car.grounded
+    ) {
+      i.boost = true;
+    }
+
+    if (t.usesDodges && this.mode === 'attack') {
+      this.maybeAerialOrDodge(i, ball, distance, absAngle);
+    }
+
+    return i;
+  }
+
+  /** Jump at a high ball, or flip into a close one for extra power. */
+  private maybeAerialOrDodge(
+    i: CarInput,
+    ball: BallSnapshot,
+    distance: number,
+    absAngle: number,
+  ): void {
+    const a = cfg.ai;
+    if (!this.car.grounded) return;
+
+    const ballHigh = ball.position.y > a.jumpBallHeight;
+    if (ballHigh && distance < a.jumpRange && absAngle < a.dodgeAngle) {
+      i.jumpPressed = true;
+      i.jumpHeld = true;
+      return;
+    }
+
+    if (
+      !ballHigh &&
+      distance < a.dodgeRange &&
+      absAngle < a.dodgeAngle &&
+      this.car.speed > a.dodgeMinSpeed
+    ) {
+      // A flip into the ball hits harder than rolling into it.
+      i.jumpPressed = true;
+      i.jumpHeld = true;
+      i.throttle = 1;
+    }
+  }
+
+  private idle(): CarInput {
+    Object.assign(this.input, emptyInput());
+    return this.input;
+  }
+
+  /** Where the bot is currently heading, for debugging. */
+  get aimTarget(): THREE.Vector3 {
+    return this.target;
+  }
+
+  /** Why it chose that target. Written every step; for tuning and tests. */
+  readonly reasoning = {
+    alignment: 0,
+    behindBall: false,
+    committed: false,
+    /** Angle to the current target in the car's own frame, radians. */
+    targetAngle: 0,
+    distance: 0,
+  };
+
+  /** Wipes the reaction buffer and intentions, for a kickoff. */
+  reset(): void {
+    this.memory.length = 0;
+    this.clock = 0;
+    this.targetPad = null;
+    this.padPickedAt = -Infinity;
+    this.aimRolledAt = -Infinity;
+    this.aimOffset = 0;
+    this.mode = 'attack';
+  }
+}

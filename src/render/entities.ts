@@ -63,6 +63,10 @@ export function createBallMesh(): THREE.Mesh {
     new THREE.IcosahedronGeometry(cfg.ball.radius, 3),
     new THREE.MeshStandardMaterial({
       color: 0xe8edf7,
+      // A little self-lit: at half-pitch the ball is only about fifteen pixels
+      // across, and it has to stay findable against a dark floor.
+      emissive: 0x6b7a99,
+      emissiveIntensity: 0.55,
       roughness: 0.3,
       metalness: 0.25,
       flatShading: true,
