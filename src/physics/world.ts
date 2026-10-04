@@ -29,6 +29,11 @@ export class PhysicsWorld {
   constructor() {
     this.world = new RAPIER.World({ x: 0, y: cfg.physics.gravity, z: 0 });
     this.world.timestep = cfg.physics.fixedDt;
+    // We work in Unreal Units, so 1 metre is 100 units. Rapier scales all of
+    // its internal length tolerances by this, including the velocity it is
+    // willing to integrate in one step: leave it at the default 1 and the car
+    // is silently capped at 400 uu/s.
+    this.world.lengthUnit = cfg.physics.lengthUnit;
     this.events = new RAPIER.EventQueue(true);
   }
 

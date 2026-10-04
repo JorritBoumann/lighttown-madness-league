@@ -25,7 +25,7 @@ export class BoostPads {
 
   update(dt: number, cars: Car[]): void {
     this.justPicked.length = 0;
-    const radius = cfg.boost.padPickupRadius;
+    const radius = cfg.boost.padRadius;
     for (const pad of this.pads) {
       if (pad.cooldown > 0) {
         pad.cooldown = Math.max(0, pad.cooldown - dt);
@@ -34,7 +34,7 @@ export class BoostPads {
       for (const car of cars) {
         const p = car.position;
         // Only count pickups near the floor, so flying overhead does not collect.
-        if (p.y > 2.2) continue;
+        if (p.y > cfg.boost.padHeight) continue;
         const dx = p.x - pad.x;
         const dz = p.z - pad.z;
         if (dx * dx + dz * dz > radius * radius) continue;

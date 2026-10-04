@@ -2,15 +2,29 @@ import * as THREE from 'three';
 import { RAPIER, type PhysicsWorld, Group, groups } from './world';
 import { cfg } from '../config';
 import { clamp, sign } from '../core/mathx';
+import { Curve } from '../core/curve';
 import type { CarInput } from '../input/types';
 import { emptyInput } from '../input/types';
 
 /**
- * Arcade car. Deliberately not a simulation: there are no wheels, no tyre model
- * and no engine curve. One box, a ground ray for contact, and direct control of
- * velocity and angular velocity. That is what makes it feel snappy.
+ * Arcade car, modelled on Rocket League's handling.
+ *
+ * Deliberately not a simulation: no tyre model, no engine curve, no differential.
+ * What it does have is the handful of things that actually produce the feel:
+ *
+ *  - throttle acceleration that falls off with speed, rather than a flat force
+ *    against a hard speed clamp (the clamp is what made the old version feel
+ *    like it hit a wall at top speed)
+ *  - steering as a front-wheel angle through a bicycle model, so turn radius
+ *    widens with speed instead of the car pivoting on the spot
+ *  - four suspension rays at the real wheel positions, so the chassis pitches
+ *    and rolls onto surfaces
+ *  - boost as pure acceleration along the nose, capped only by the global max
+ *  - per-axis air control with its own damping, roll far stronger than pitch
+ *    and yaw, which is what makes air roll the backbone of air play
  *
  * Local axes: +x is forward (nose), +y is up (roof), +z is right.
+ * Units are Unreal Units throughout: see src/config.ts.
  */
 
 const FWD = new THREE.Vector3(1, 0, 0);
@@ -20,8 +34,8 @@ const RIGHT = new THREE.Vector3(0, 0, 1);
 export interface CarModifiers {
   /** Multipliers applied on top of config, for upgrades and round modifiers. */
   accel: number;
-  maxSpeed: number
-  boostForce: number;
+  maxSpeed: number;
+  boostAccel: number;
   boostDrain: number;
   turnRate: number;
   jump: number;
@@ -29,7 +43,16 @@ export interface CarModifiers {
 }
 
 export function defaultModifiers(): CarModifiers {
-  return { accel: 1, maxSpeed: 1, boostForce: 1, boostDrain: 1, turnRate: 1, jump: 1, boostMax: 1 };
+  return { accel: 1, maxSpeed: 1, boostAccel: 1, boostDrain: 1, turnRate: 1, jump: 1, boostMax: 1 };
+}
+
+/** One suspension ray. */
+interface Wheel {
+  /** Position in car-local space. */
+  local: THREE.Vector3;
+  radius: number;
+  /** Whether this wheel found ground on the last step. */
+  contact: boolean;
 }
 
 export class Car {
@@ -42,17 +65,34 @@ export class Car {
 
   boost = cfg.boost.start;
 
-  // Contact + jump state.
+  // Contact and jump state.
   grounded = false;
   /** Landed on a side or the roof, with no wheels to drive on. */
   beached = false;
+  /** Distance from the nearest wheel to the surface. Handy while tuning. */
+  groundDistance = Infinity;
+
+  private readonly wheels: Wheel[];
   private groundNormal = new THREE.Vector3(0, 1, 0);
   private beachNormal = new THREE.Vector3(0, 1, 0);
   private airTime = 0;
   private jumpsUsed = 0;
   private jumpHoldRemaining = 0;
-  private flipLock = 0;
+  /** Suppresses ground detection just after a jump, so the car leaves cleanly. */
+  private groundLockout = 0;
+  private dodgeLock = 0;
   private wasJumpHeld = false;
+  /**
+   * Set when a press has been acted on, cleared when jump is released. Rocket
+   * League needs a release between the first and second jump, and without this
+   * a press that stays true for more than one step fires twice over.
+   */
+  private jumpConsumed = false;
+
+  // Curves, rebuilt when the config changes.
+  private throttleCurve: Curve;
+  private steerCurve: Curve;
+  private powerslideCurve: Curve;
 
   // Scratch objects, reused every step so the hot loop does not allocate.
   private readonly q = new THREE.Quaternion();
@@ -60,11 +100,11 @@ export class Car {
   private readonly up = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private readonly vel = new THREE.Vector3();
+  private readonly angvel = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
   private readonly tmp3 = new THREE.Vector3();
   private readonly cornerVel = new THREE.Vector3();
-  private readonly angvel = new THREE.Vector3();
   private readonly alignQ = new THREE.Quaternion();
 
   constructor(
@@ -72,7 +112,11 @@ export class Car {
     spawn: { x: number; y: number; z: number },
     spawnYaw = 0,
   ) {
-    const he = cfg.car.halfExtents;
+    const h = cfg.car.hitbox;
+    const hx = h.length / 2;
+    const hy = h.height / 2;
+    const hz = h.width / 2;
+
     this.body = phys.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(spawn.x, spawn.y, spawn.z)
@@ -81,16 +125,37 @@ export class Car {
         .setAngularDamping(0)
         .setCcdEnabled(true),
     );
-    const br = Math.min(cfg.car.colliderRadius, he.y * 0.9);
+
+    const br = Math.min(cfg.car.colliderRadius, hy * 0.9);
     this.collider = phys.world.createCollider(
-      RAPIER.ColliderDesc.roundCuboid(he.x - br, he.y - br, he.z - br, br)
-        .setFriction(0.2)
-        .setRestitution(0.1)
+      RAPIER.ColliderDesc.roundCuboid(hx - br, hy - br, hz - br, br)
+        .setFriction(0.106)
+        .setRestitution(0)
         .setMass(cfg.car.mass)
         .setCollisionGroups(groups(Group.CAR, Group.ARENA | Group.BALL))
         .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       this.body,
     );
+
+    const f = cfg.car.frontWheel;
+    const r = cfg.car.rearWheel;
+    this.wheels = [
+      { local: new THREE.Vector3(f.x, -hy, f.z), radius: f.radius, contact: false },
+      { local: new THREE.Vector3(f.x, -hy, -f.z), radius: f.radius, contact: false },
+      { local: new THREE.Vector3(r.x, -hy, r.z), radius: r.radius, contact: false },
+      { local: new THREE.Vector3(r.x, -hy, -r.z), radius: r.radius, contact: false },
+    ];
+
+    this.throttleCurve = new Curve(cfg.car.throttleCurve);
+    this.steerCurve = new Curve(cfg.car.steerCurve);
+    this.powerslideCurve = new Curve(cfg.car.powerslideSteerCurve);
+  }
+
+  /** Re-reads the tuning curves. Called when the config changes. */
+  syncConfig(): void {
+    this.throttleCurve = new Curve(cfg.car.throttleCurve);
+    this.steerCurve = new Curve(cfg.car.steerCurve);
+    this.powerslideCurve = new Curve(cfg.car.powerslideSteerCurve);
   }
 
   get position(): RAPIER.Vector {
@@ -117,12 +182,19 @@ export class Car {
   }
 
   get isSupersonic(): boolean {
-    return this.speed > cfg.car.maxSpeed * this.mods.maxSpeed * 0.95;
+    return this.speed >= cfg.car.supersonicSpeed;
   }
 
-  /** True while a second jump or flip is still available. */
+  /** True while a second jump or dodge is still available. */
   get canDoubleJump(): boolean {
-    return this.jumpsUsed === 1 && this.airTime < cfg.car.doubleJumpWindow && this.flipLock <= 0;
+    return this.jumpsUsed === 1 && this.airTime < cfg.car.doubleJumpWindow && this.dodgeLock <= 0;
+  }
+
+  /** How many wheels are touching. Drives the HUD and the AI's decisions. */
+  get wheelsOnGround(): number {
+    let n = 0;
+    for (const w of this.wheels) if (w.contact) n++;
+    return n;
   }
 
   addBoost(amount: number): void {
@@ -138,17 +210,20 @@ export class Car {
     this.body.resetTorques(true);
     this.jumpsUsed = 0;
     this.airTime = 0;
-    this.flipLock = 0;
+    this.dodgeLock = 0;
+    this.groundLockout = 0;
     this.jumpHoldRemaining = 0;
+    this.jumpConsumed = false;
     this.boost = cfg.boost.start;
+    for (const w of this.wheels) w.contact = false;
   }
 
   /** One fixed physics step of car logic. Call before world.step(). */
   update(dt: number): void {
     const inp = this.input;
 
-    // Rapier keeps forces added with addForce until they are reset, so clear them
-    // every step and drive the car with per-step impulses instead.
+    // Rapier keeps forces added with addForce until they are reset, so clear
+    // them every step and drive the car with per-step impulses instead.
     this.body.resetForces(false);
     this.body.resetTorques(false);
 
@@ -163,7 +238,8 @@ export class Car {
     const av = this.body.angvel();
     this.angvel.set(av.x, av.y, av.z);
 
-    this.flipLock = Math.max(0, this.flipLock - dt);
+    this.dodgeLock = Math.max(0, this.dodgeLock - dt);
+    this.groundLockout = Math.max(0, this.groundLockout - dt);
 
     this.probeGround(dt);
 
@@ -195,56 +271,68 @@ export class Car {
   // --- internals ----------------------------------------------------------
 
   /**
-   * Four suspension rays, one per corner, cast along the car's own -up axis so
-   * wall and ceiling driving work the same way. Per-corner springs are what let
-   * the car pitch and roll onto a slope instead of butting into it.
+   * Four suspension rays at the real wheel positions, cast along the car's own
+   * -up axis so wall and ceiling driving work the same way. Per-wheel springs
+   * are what let the car pitch and roll onto a slope instead of butting into it.
    */
   private probeGround(dt: number): void {
     const c = cfg.car;
-    const he = c.halfExtents;
     const p = this.body.translation();
     const dir = this.tmp.copy(this.up).negate();
-    const reach = c.rideHeight + c.groundRayLength;
 
     let contacts = 0;
     let nearest = Infinity;
     this.groundNormal.set(0, 0, 0);
 
-    for (let i = 0; i < 4; i++) {
-      const sx = i < 2 ? 1 : -1;
-      const sz = i % 2 === 0 ? 1 : -1;
-      // Corner position in world space.
-      const corner = this.tmp2
+    // Just after a jump the wheels are still within suspension range. Pushing
+    // against that would add height the jump figures do not account for.
+    if (this.groundLockout > 0) {
+      for (const wheel of this.wheels) wheel.contact = false;
+      this.grounded = false;
+      this.beached = false;
+      this.groundDistance = Infinity;
+      return;
+    }
+
+    for (const wheel of this.wheels) {
+      // Ray starts at the wheel's mounting point and reaches past the tyre.
+      const rest = c.rideHeight + wheel.radius;
+      const reach = rest + c.suspensionTravel;
+      const origin = this.tmp2
         .set(p.x, p.y, p.z)
-        .addScaledVector(this.fwd, sx * he.x * c.suspensionSpreadX)
-        .addScaledVector(this.right, sz * he.z * c.suspensionSpreadZ);
+        .addScaledVector(this.fwd, wheel.local.x)
+        .addScaledVector(this.up, wheel.local.y)
+        .addScaledVector(this.right, wheel.local.z);
 
       const hit = this.phys.ray(
-        { x: corner.x, y: corner.y, z: corner.z },
+        { x: origin.x, y: origin.y, z: origin.z },
         { x: dir.x, y: dir.y, z: dir.z },
         reach,
         this.body,
       );
+      wheel.contact = !!hit && hit.distance <= rest + c.suspensionTravel * 0.5;
       if (!hit) continue;
 
-      contacts++;
-      nearest = Math.min(nearest, hit.distance);
-      this.groundNormal.x += hit.normal.x;
-      this.groundNormal.y += hit.normal.y;
-      this.groundNormal.z += hit.normal.z;
+      if (wheel.contact) {
+        contacts++;
+        nearest = Math.min(nearest, hit.distance);
+        this.groundNormal.x += hit.normal.x;
+        this.groundNormal.y += hit.normal.y;
+        this.groundNormal.z += hit.normal.z;
+      }
 
-      // Spring and damper for this corner, applied at the corner so it produces
+      // Spring and damper for this wheel, applied at the wheel so it produces
       // the pitch and roll the chassis should have.
-      const compression = c.rideHeight - hit.distance;
+      const compression = rest - hit.distance;
       if (compression <= 0) continue;
-      const cornerVel = this.cornerVelocity(corner, p);
-      const normalVel = cornerVel.dot(this.up);
+      const wheelVel = this.pointVelocity(origin, p);
+      const normalVel = wheelVel.dot(this.up);
       const accel = compression * c.suspensionStiffness - normalVel * c.suspensionDamping;
       if (accel <= 0) continue;
-      const j = accel * cfg.car.mass * dt;
+      const j = accel * c.mass * dt;
       this.body.applyImpulseAtPoint(
         { x: this.up.x * j, y: this.up.y * j, z: this.up.z * j },
-        { x: corner.x, y: corner.y, z: corner.z },
+        { x: origin.x, y: origin.y, z: origin.z },
         true,
       );
     }
@@ -254,7 +342,7 @@ export class Car {
       if (this.groundNormal.lengthSq() < 1e-6) this.groundNormal.copy(this.up);
       this.groundDistance = nearest;
       // Two wheels down is enough to drive; one is a scrape, not traction.
-      this.grounded = contacts >= 2 && nearest <= c.rideHeight + 0.4;
+      this.grounded = contacts >= 2;
     } else {
       this.grounded = false;
       this.groundDistance = Infinity;
@@ -264,29 +352,29 @@ export class Car {
     // entirely, so it would never recover. Catch that with a world-space ray.
     this.beached = false;
     if (!this.grounded) {
-      const diag = Math.hypot(he.x, he.y, he.z);
+      const h = c.hitbox;
+      const diag = Math.hypot(h.length, h.height, h.width) / 2;
       const rest = this.phys.ray(
         { x: p.x, y: p.y, z: p.z },
         { x: 0, y: -1, z: 0 },
-        diag + 0.25,
+        diag + 20,
         this.body,
       );
       if (rest && this.vel.lengthSq() < c.rightingSpeedLimit ** 2) {
-        this.beached = true;
         this.beachNormal.set(rest.normal.x, rest.normal.y, rest.normal.z);
         if (this.beachNormal.lengthSq() < 1e-6) this.beachNormal.set(0, 1, 0);
+        // Only beached if the roof is actually pointing away from the surface.
+        // A car flying low and slow over the floor is not stuck, it is flying.
+        this.beached = this.up.dot(this.beachNormal) < c.rightingUprightLimit;
       }
     }
   }
 
   /** Velocity of a world-space point on the chassis, including spin. */
-  private cornerVelocity(corner: THREE.Vector3, centre: RAPIER.Vector): THREE.Vector3 {
-    const r = this.tmp3.set(corner.x - centre.x, corner.y - centre.y, corner.z - centre.z);
+  private pointVelocity(point: THREE.Vector3, centre: RAPIER.Vector): THREE.Vector3 {
+    const r = this.tmp3.set(point.x - centre.x, point.y - centre.y, point.z - centre.z);
     return this.cornerVel.copy(this.angvel).cross(r).add(this.vel);
   }
-
-  /** Distance from the nearest corner to the surface. Handy while tuning. */
-  groundDistance = Infinity;
 
   private driveOnGround(dt: number): void {
     const c = cfg.car;
@@ -294,60 +382,63 @@ export class Car {
     const inp = this.input;
     const n = this.groundNormal;
 
-    // The corner impulses have already changed the velocity this step.
-    const lv0 = this.body.linvel();
-    this.vel.set(lv0.x, lv0.y, lv0.z);
+    // The wheel impulses have already changed the velocity this step.
+    const lv = this.body.linvel();
+    this.vel.set(lv.x, lv.y, lv.z);
 
-    // The per-corner springs in probeGround() already hold the ride height.
-    // Press into the surface so the car can carry speed up walls and round the
-    // seam ramps without floating off.
-    this.vel.addScaledVector(n, -c.stickForce * dt);
-
-    // Forward direction projected onto the surface plane.
+    // Work in the surface plane, so this all holds on walls and the ceiling.
     const planeFwd = this.tmp.copy(this.fwd).addScaledVector(n, -this.fwd.dot(n)).normalize();
     const planeRight = this.tmp2.copy(this.right).addScaledVector(n, -this.right.dot(n)).normalize();
-
     const alongSpeed = this.vel.dot(planeFwd);
-    const maxSpeed = (inp.boost && this.boost > 0 ? c.boostMaxSpeed : c.maxSpeed) * m.maxSpeed;
+    const absAlong = Math.abs(alongSpeed);
 
-    // Throttle, brake and coast drag.
+    // --- Throttle, brake, coast ---
     if (inp.throttle !== 0) {
-      const opposing = sign(inp.throttle) !== sign(alongSpeed) && Math.abs(alongSpeed) > 0.6;
-      let accel: number;
-      if (opposing) accel = c.brakeAccel;
-      else if (inp.throttle > 0) accel = c.accel * m.accel;
-      else accel = c.reverseAccel;
-      const headroom = inp.throttle > 0 ? maxSpeed : c.maxSpeed * 0.45;
-      if (Math.abs(alongSpeed) < headroom || opposing) {
-        this.vel.addScaledVector(planeFwd, inp.throttle * accel * dt);
+      const opposing = sign(inp.throttle) !== sign(alongSpeed) && absAlong > 10;
+      if (opposing) {
+        // Braking: a flat, strong deceleration, and it never pushes you past a stop.
+        const drop = Math.min(absAlong, c.brakeAccel * dt);
+        this.vel.addScaledVector(planeFwd, -sign(alongSpeed) * drop);
+      } else if (inp.throttle > 0) {
+        // Acceleration tapers to nothing at maxDriveSpeed. No hard clamp, which
+        // is what keeps the top end from feeling like hitting a wall.
+        const accel = this.throttleCurve.at(absAlong) * m.accel;
+        this.vel.addScaledVector(planeFwd, accel * dt);
+      } else {
+        // Reverse tops out well below forwards.
+        if (absAlong < c.maxDriveSpeed * 0.4) {
+          this.vel.addScaledVector(planeFwd, -c.brakeAccel * dt);
+        }
       }
-    } else if (Math.abs(alongSpeed) > 0.05) {
-      const drop = Math.min(Math.abs(alongSpeed), c.coastDrag * dt);
+    } else if (absAlong > 1) {
+      const drop = Math.min(absAlong, c.coastDecel * dt);
       this.vel.addScaledVector(planeFwd, -sign(alongSpeed) * drop);
     }
 
-    // Lateral grip: scrub off sideways velocity.
+    // --- Lateral grip ---
+    // A fraction of sideways speed shed per step. Powerslide cuts it right down,
+    // which is the whole trick: the car keeps its heading while it slides.
     const lateral = this.vel.dot(planeRight);
-    const grip = c.lateralGrip * (inp.drift ? c.driftGripMultiplier : 1);
-    const scrub = Math.min(Math.abs(lateral), grip * dt * Math.max(1, Math.abs(lateral)));
-    this.vel.addScaledVector(planeRight, -sign(lateral) * scrub);
+    const grip = inp.drift ? c.handbrakeGrip : c.lateralGrip;
+    this.vel.addScaledVector(planeRight, -lateral * Math.min(1, grip * 120 * dt));
+
+    // Press into the surface so the car holds walls and the seam ramps.
+    this.vel.addScaledVector(n, -c.stickForce * dt);
 
     this.body.setLinvel({ x: this.vel.x, y: this.vel.y, z: this.vel.z }, true);
 
-    // Steering: directly drive yaw rate about the surface normal. Turn authority
-    // tapers off with speed so flat out is committed rather than twitchy.
-    const speedFrac = clamp(Math.abs(alongSpeed) / Math.max(1, c.maxSpeed), 0, 1);
-    const turnScale = 1 - c.turnSpeedFalloff * speedFrac;
-    const reversing = alongSpeed < -0.5;
-    let yawRate =
-      inp.steer *
-      c.turnRate *
-      m.turnRate *
-      turnScale *
-      (inp.drift ? c.driftTurnMultiplier : 1) *
-      (reversing ? -1 : 1);
-    // Standing still with no throttle should not let the car spin on the spot.
-    if (Math.abs(alongSpeed) < 0.8 && inp.throttle === 0) yawRate *= 0.15;
+    // --- Steering ---
+    // Front wheel angle from the curve, then a bicycle model for yaw rate:
+    // omega = v * tan(delta) / wheelbase. Turn radius therefore widens with
+    // speed on its own, instead of needing a fudge factor.
+    const steerAngle =
+      (inp.drift ? this.powerslideCurve.at(absAlong) : this.steerCurve.at(absAlong)) *
+      (inp.drift ? c.powerslideSteerGain : 1);
+    let yawRate = (absAlong * Math.tan(steerAngle * inp.steer)) / c.steerWheelbase;
+    yawRate *= m.turnRate;
+    if (alongSpeed < 0) yawRate = -yawRate;
+    // Standing still with no throttle should not let the car pivot on the spot.
+    if (absAlong < 20 && inp.throttle === 0) yawRate *= 0.1;
 
     // Alignment: rotate the roof toward the surface normal.
     this.alignQ.setFromUnitVectors(this.up, n);
@@ -355,9 +446,10 @@ export class Car {
     const axisLen = Math.hypot(this.alignQ.x, this.alignQ.y, this.alignQ.z);
     const target = this.tmp.set(0, 0, 0).addScaledVector(n, yawRate);
     if (axisLen > 1e-5 && alignAngle > 1e-4) {
-      target.x += (this.alignQ.x / axisLen) * alignAngle * c.surfaceAlignRate;
-      target.y += (this.alignQ.y / axisLen) * alignAngle * c.surfaceAlignRate;
-      target.z += (this.alignQ.z / axisLen) * alignAngle * c.surfaceAlignRate;
+      const k = (alignAngle * c.surfaceAlignRate) / axisLen;
+      target.x += this.alignQ.x * k;
+      target.y += this.alignQ.y * k;
+      target.z += this.alignQ.z * k;
     }
     this.body.setAngvel({ x: target.x, y: target.y, z: target.z }, true);
   }
@@ -366,23 +458,29 @@ export class Car {
     const c = cfg.car;
     const inp = this.input;
 
-    if (this.flipLock <= 0) {
-      // Config torques are read as angular accelerations: direct, predictable,
+    if (this.dodgeLock <= 0) {
+      // Config values are angular accelerations in rad/s^2: direct, predictable,
       // and independent of the inertia tensor.
-      this.angvel.addScaledVector(this.right, -inp.pitch * c.airPitchTorque * dt);
-      this.angvel.addScaledVector(this.up, inp.steer * c.airYawTorque * dt);
-      this.angvel.addScaledVector(this.fwd, inp.roll * c.airRollTorque * dt);
+      this.angvel.addScaledVector(this.right, -inp.pitch * c.airPitchAccel * dt);
+      this.angvel.addScaledVector(this.up, inp.steer * c.airYawAccel * dt);
+      this.angvel.addScaledVector(this.fwd, inp.roll * c.airRollAccel * dt);
 
-      // Bleed off rotation only on axes with no input, so held input stays crisp.
-      const bleed = Math.pow(c.airAngularDamping, dt * 60);
-      if (inp.pitch === 0 && inp.steer === 0 && inp.roll === 0) {
-        this.angvel.multiplyScalar(bleed);
-      }
+      // Per-axis damping, applied only where there is no input. Holding an axis
+      // stays crisp; releasing it settles.
+      this.dampAxis(this.right, inp.pitch, c.airPitchDamping, dt);
+      this.dampAxis(this.up, inp.steer, c.airYawDamping, dt);
+      this.dampAxis(this.fwd, inp.roll, c.airRollDamping, dt);
     }
 
-    const maxAng = c.maxAngularSpeed;
-    if (this.angvel.length() > maxAng) this.angvel.setLength(maxAng);
+    if (this.angvel.length() > c.maxAngularSpeed) this.angvel.setLength(c.maxAngularSpeed);
     this.body.setAngvel({ x: this.angvel.x, y: this.angvel.y, z: this.angvel.z }, true);
+  }
+
+  /** Bleeds spin off one body axis, unless that axis is being driven. */
+  private dampAxis(axis: THREE.Vector3, input: number, rate: number, dt: number): void {
+    if (input !== 0) return;
+    const component = this.angvel.dot(axis);
+    this.angvel.addScaledVector(axis, -component * Math.min(1, rate * dt));
   }
 
   /** Rolls a beached car back onto its wheels, and lifts it clear as it goes. */
@@ -407,33 +505,38 @@ export class Car {
     const inp = this.input;
     const jumpScale = this.mods.jump;
 
-    // Sustained first jump.
+    // Sustained first jump: holding jump keeps accelerating for a short window.
     if (this.jumpHoldRemaining > 0) {
       if (inp.jumpHeld) {
         this.jumpHoldRemaining -= dt;
-        this.impulseAlong(this.up, c.jumpHoldForce * jumpScale * dt);
+        this.impulseAlong(this.up, c.jumpAccel * jumpScale * dt);
       } else {
         this.jumpHoldRemaining = 0;
       }
     }
 
-    const pressed = inp.jumpPressed || (inp.jumpHeld && !this.wasJumpHeld);
+    if (!inp.jumpHeld && !inp.jumpPressed) this.jumpConsumed = false;
+
+    const pressed =
+      !this.jumpConsumed && (inp.jumpPressed || (inp.jumpHeld && !this.wasJumpHeld));
     if (!pressed) return;
+    this.jumpConsumed = true;
 
     if (this.grounded || this.jumpsUsed === 0) {
       this.impulseAlong(this.up, c.jumpImpulse * jumpScale);
       this.jumpsUsed = 1;
       this.jumpHoldRemaining = c.jumpHoldTime;
       this.grounded = false;
+      this.groundLockout = c.jumpGroundLockout;
       this.airTime = 0.0001;
       return;
     }
 
     if (this.canDoubleJump) {
-      const dirX = inp.throttle;
+      const dirX = inp.throttle || inp.pitch;
       const dirZ = inp.steer;
-      if (Math.abs(dirX) > 0.25 || Math.abs(dirZ) > 0.25) {
-        this.flip(dirX, dirZ);
+      if (Math.abs(dirX) > c.dodgeDeadzone || Math.abs(dirZ) > c.dodgeDeadzone) {
+        this.dodge(dirX, dirZ);
       } else {
         this.impulseAlong(this.up, c.doubleJumpImpulse * jumpScale);
       }
@@ -441,25 +544,30 @@ export class Car {
     }
   }
 
-  /** Directional flip: a committed kick plus the spin that reads as the move. */
-  private flip(dirX: number, dirZ: number): void {
+  /** Directional dodge: a committed kick plus the spin that reads as the move. */
+  private dodge(dirX: number, dirZ: number): void {
     const c = cfg.car;
     const mag = Math.hypot(dirX, dirZ);
     const fx = dirX / mag;
     const fz = dirZ / mag;
 
-    // Kick along the car's own horizontal plane.
-    const kick = this.tmp.set(0, 0, 0).addScaledVector(this.fwd, fx).addScaledVector(this.right, fz);
+    // Kick in the car's own horizontal plane.
+    const kick = this.tmp
+      .set(0, 0, 0)
+      .addScaledVector(this.fwd, fx)
+      .addScaledVector(this.right, fz);
     kick.addScaledVector(this.up, -this.up.dot(kick)).normalize();
 
-    // Flatten vertical velocity so a front flip actually goes forward.
     const lv = this.body.linvel();
     this.vel.set(lv.x, lv.y, lv.z);
+
+    // Flatten vertical velocity so a front dodge actually goes forward. That
+    // conversion, plus the flat kick, is what makes flipping a way to travel.
     this.vel.addScaledVector(this.up, -this.vel.dot(this.up) * 0.45);
-    this.vel.addScaledVector(kick, c.flipImpulse);
+    this.vel.addScaledVector(kick, c.dodgeImpulse);
     this.body.setLinvel({ x: this.vel.x, y: this.vel.y, z: this.vel.z }, true);
 
-    // Spin about the axis perpendicular to the kick: pitch for forward/back,
+    // Spin about the axis perpendicular to the kick: pitch for forward and back,
     // roll for sideways.
     const axis = this.tmp2
       .set(0, 0, 0)
@@ -467,28 +575,22 @@ export class Car {
       .addScaledVector(this.fwd, -fz)
       .normalize();
     this.body.setAngvel(
-      {
-        x: axis.x * c.flipTorque,
-        y: axis.y * c.flipTorque,
-        z: axis.z * c.flipTorque,
-      },
+      { x: axis.x * c.dodgeTorque, y: axis.y * c.dodgeTorque, z: axis.z * c.dodgeTorque },
       true,
     );
-    this.flipLock = c.flipLockTime;
+    this.dodgeLock = c.dodgeLockTime;
   }
 
   private applyBoost(dt: number): void {
     const inp = this.input;
     if (!inp.boost || this.boost <= 0) return;
     this.boost = Math.max(0, this.boost - cfg.boost.drainPerSec * this.mods.boostDrain * dt);
-    this.impulseAlong(this.fwd, cfg.boost.force * this.mods.boostForce * dt);
+    this.impulseAlong(this.fwd, cfg.boost.accel * this.mods.boostAccel * dt);
   }
 
-  /** Boosting raises the cap; otherwise hold the no-boost ceiling. */
+  /** The one hard speed limit. Throttle tapers off on its own well below it. */
   private clampSpeed(): void {
-    const cap =
-      (this.input.boost && this.boost > 0 ? cfg.car.boostMaxSpeed : cfg.car.maxSpeed) *
-      this.mods.maxSpeed;
+    const cap = cfg.car.maxSpeed * this.mods.maxSpeed;
     const lv = this.body.linvel();
     const speed = Math.hypot(lv.x, lv.y, lv.z);
     if (speed > cap) {
@@ -497,7 +599,7 @@ export class Car {
     }
   }
 
-  /** `magnitude` is a change in velocity (m/s), not a force. */
+  /** `magnitude` is a change in velocity (uu/s), not a force. */
   private impulseAlong(dir: THREE.Vector3, magnitude: number): void {
     const j = magnitude * cfg.car.mass;
     this.body.applyImpulse({ x: dir.x * j, y: dir.y * j, z: dir.z * j }, true);

@@ -2,9 +2,11 @@ import * as THREE from 'three';
 import { cfg } from './config';
 import { initPhysics, PhysicsWorld } from './physics/world';
 import { createArena, type Arena } from './physics/arena';
+import { kickoffSpawns } from './core/arenaLayout';
 import { Ball } from './physics/ball';
 import { Car } from './physics/car';
 import { BoostPads } from './physics/boostPads';
+import { CarBallInteraction } from './physics/carBall';
 import { Keyboard } from './input/keyboard';
 import { emptyInput, type CarInput } from './input/types';
 import { createRenderer, type Renderer } from './render/scene';
@@ -25,6 +27,7 @@ export class Game {
   private readonly ball: Ball;
   private readonly car: Car;
   private readonly pads: BoostPads;
+  private readonly carBall = new CarBallInteraction();
 
   private readonly render: Renderer;
   private readonly chase: ChaseCamera;
@@ -46,7 +49,8 @@ export class Game {
     this.phys = new PhysicsWorld();
     this.arena = createArena(this.phys);
     this.ball = new Ball(this.phys);
-    this.car = new Car(this.phys, this.spawnPoint(), 0);
+    const start = this.spawn();
+    this.car = new Car(this.phys, start.pos, start.yaw);
     this.pads = new BoostPads();
 
     this.render = createRenderer(canvas);
@@ -65,7 +69,7 @@ export class Game {
     this.keyboard = new Keyboard();
     this.hud = new Hud(ui);
     this.panel = new TweakPanel(ui);
-    this.panel.onChange(() => this.ball.syncConfig());
+    this.panel.onChange(() => this.syncConfig());
 
     this.chase.snapTo(this.car.position, this.car.forward());
 
@@ -75,7 +79,7 @@ export class Game {
       () => cfg.physics.maxStepsPerFrame,
     );
 
-    window.addEventListener('config:hot', () => this.ball.syncConfig());
+    window.addEventListener('config:hot', () => this.syncConfig());
   }
 
   static async create(canvas: HTMLCanvasElement, ui: HTMLElement): Promise<Game> {
@@ -87,8 +91,13 @@ export class Game {
     this.loop.start();
   }
 
-  private spawnPoint(): { x: number; y: number; z: number } {
-    return { x: -cfg.arena.length / 2 + 10, y: cfg.car.rideHeight, z: 0 };
+  /** Kickoff spot for the player: the middle one at the -x end. */
+  private spawn(): { pos: { x: number; y: number; z: number }; yaw: number } {
+    const spot = kickoffSpawns(-1)[4]!;
+    return {
+      pos: { x: spot.x, z: spot.z, y: cfg.car.hitbox.height / 2 + cfg.car.rideHeight },
+      yaw: spot.yaw,
+    };
   }
 
   private fixedStep(dt: number): void {
@@ -106,21 +115,15 @@ export class Game {
     this.drainContactEvents();
   }
 
-  /** Adds a touch of extra pop when the car hits the ball, so shots feel decisive. */
+  /** Car-on-ball touches get the speed-dependent bounce on top of the contact. */
   private drainContactEvents(): void {
-    const pop = cfg.ball.hitBoost;
-    if (pop <= 1) {
-      this.phys.events.drainCollisionEvents(() => {});
-      return;
-    }
     const ballHandle = this.ball.collider.handle;
     const carHandle = this.car.collider.handle;
     this.phys.events.drainCollisionEvents((h1, h2, started) => {
       if (!started) return;
-      const pair = (h1 === ballHandle && h2 === carHandle) || (h2 === ballHandle && h1 === carHandle);
-      if (!pair) return;
-      const v = this.ball.body.linvel();
-      this.ball.body.setLinvel({ x: v.x * pop, y: v.y * pop, z: v.z * pop }, true);
+      const pair =
+        (h1 === ballHandle && h2 === carHandle) || (h2 === ballHandle && h1 === carHandle);
+      if (pair) this.carBall.apply(this.car, this.ball);
     });
   }
 
@@ -157,9 +160,17 @@ export class Game {
     if (this.keyboard.wasPressed('KeyB')) this.ball.reset();
   }
 
+  /** Re-reads every tunable that is cached rather than read per step. */
+  private syncConfig(): void {
+    this.ball.syncConfig();
+    this.car.syncConfig();
+    this.carBall.syncConfig();
+  }
+
   /** Kick-off state: car on its line, ball in the middle, pads back up. */
   resetPlay(): void {
-    this.car.reset(this.spawnPoint(), 0);
+    const start = this.spawn();
+    this.car.reset(start.pos, start.yaw);
     this.ball.reset();
     this.pads.resetAll();
     this.carInterp.snap(this.car.position, this.car.body.rotation());

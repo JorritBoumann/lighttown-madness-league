@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { cfg } from '../config';
-import { buildArenaLayout } from '../core/arenaLayout';
+import { buildArenaLayout, type ArenaLayout } from '../core/arenaLayout';
 
 export interface Renderer {
   renderer: THREE.WebGLRenderer;
@@ -17,29 +17,30 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0d16);
-  scene.fog = new THREE.Fog(0x0a0d16, 90, 220);
 
-  const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1, 0.1, 600);
-  camera.position.set(-20, 8, 0);
+  // Near and far have to suit a pitch 10240 long.
+  const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1, 10, 40000);
+  camera.position.set(-2000, 400, 0);
 
-  const hemi = new THREE.HemisphereLight(0xa8c8ff, 0x2a3348, 1.15);
+  const hemi = new THREE.HemisphereLight(0xa8c8ff, 0x2a3348, 1.1);
   scene.add(hemi);
 
   // Low fill from the far end, so the car reads against the floor at both ends.
-  const fill = new THREE.DirectionalLight(0x6f9bd8, 0.45);
-  fill.position.set(-50, 20, -20);
+  const fill = new THREE.DirectionalLight(0x6f9bd8, 0.4);
+  fill.position.set(-4000, 2000, -2000);
   scene.add(fill);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-  sun.position.set(40, 70, 30);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+  sun.position.set(2500, 5000, 2000);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  const span = cfg.arena.length * 0.7;
+  const span = cfg.arena.halfLength * 1.2;
   sun.shadow.camera.left = -span;
   sun.shadow.camera.right = span;
   sun.shadow.camera.top = span;
   sun.shadow.camera.bottom = -span;
-  sun.shadow.camera.far = 220;
+  sun.shadow.camera.near = 100;
+  sun.shadow.camera.far = 16000;
   scene.add(sun);
 
   scene.add(buildArenaMesh());
@@ -74,24 +75,38 @@ function buildArenaMesh(): THREE.Group {
     metalness: 0.2,
     side: THREE.DoubleSide,
   });
-
+  const rampMat = new THREE.MeshStandardMaterial({
+    color: 0x44557f,
+    roughness: 0.6,
+    metalness: 0.2,
+    side: THREE.DoubleSide,
+  });
   // The ceiling is a playable surface but sits between the camera and the pitch,
   // so it is drawn as a faint shell rather than a solid lid.
   const ceilingMat = new THREE.MeshStandardMaterial({
-    color: 0x3a4a72,
-    roughness: 0.55,
+    color: 0x33415f,
     transparent: true,
-    opacity: 0.12,
+    opacity: 0.22,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const ceilingY = cfg.arena.wallHeight + 1;
+  const goalBoxMat = new THREE.MeshStandardMaterial({
+    color: 0x1d2742,
+    roughness: 0.8,
+    side: THREE.DoubleSide,
+  });
 
-  for (const [i, panel] of layout.panels.entries()) {
-    const isFloor = i === 0;
-    const isCeiling = !isFloor && panel.pos.y >= ceilingY - 0.001 && panel.half.x > 10;
+  const byKind: Record<string, THREE.Material> = {
+    floor: floorMat,
+    wall: wallMat,
+    ramp: rampMat,
+    ceiling: ceilingMat,
+    goal: goalBoxMat,
+  };
+
+  for (const panel of layout.panels) {
     const geo = new THREE.BoxGeometry(panel.half.x * 2, panel.half.y * 2, panel.half.z * 2);
-    const mesh = new THREE.Mesh(geo, isFloor ? floorMat : isCeiling ? ceilingMat : wallMat);
+    const mesh = new THREE.Mesh(geo, byKind[panel.kind ?? 'wall'] ?? wallMat);
     mesh.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
     if (panel.pitch) {
       if (panel.axis === 'z') mesh.rotation.z = panel.pitch;
@@ -99,41 +114,24 @@ function buildArenaMesh(): THREE.Group {
     } else {
       mesh.rotation.y = panel.yaw;
     }
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = panel.kind !== 'ceiling';
     group.add(mesh);
   }
 
-  // Floor grid: the main cue for speed and distance. Without it the arena reads
-  // as a flat void and nothing feels fast. Bounded to the pitch, so it does not
-  // poke through the walls.
-  group.add(buildFloorGrid(layout.halfLength, layout.halfWidth));
-
-  // Centre circle and halfway line, so you can read your position at a glance.
-  const lineMat = new THREE.LineBasicMaterial({ color: 0x7e9ad6, transparent: true, opacity: 0.7 });
-  const circlePts: THREE.Vector3[] = [];
-  for (let i = 0; i <= 64; i++) {
-    const a = (i / 64) * Math.PI * 2;
-    circlePts.push(new THREE.Vector3(Math.cos(a) * 9, 0.02, Math.sin(a) * 9));
-  }
-  group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(circlePts), lineMat));
-  group.add(
-    new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0.02, -layout.halfWidth),
-        new THREE.Vector3(0, 0.02, layout.halfWidth),
-      ]),
-      lineMat,
-    ),
-  );
+  group.add(buildFloorMarkings(layout));
+  // The ceiling is in shot most of the time. A grid on it keeps it reading as a
+  // surface you could drive on rather than as empty space.
+  group.add(buildCeilingGrid(layout));
 
   // Goal mouths, tinted per end.
   for (const goal of layout.goals) {
     const mat = new THREE.MeshStandardMaterial({
       color: goal.sign > 0 ? 0xff7043 : 0x42a5f5,
       emissive: goal.sign > 0 ? 0x702a10 : 0x113a60,
+      emissiveIntensity: 0.6,
       roughness: 0.4,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.3,
       side: THREE.DoubleSide,
     });
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(goal.width, goal.height), mat);
@@ -142,36 +140,81 @@ function buildArenaMesh(): THREE.Group {
     group.add(plane);
 
     // Frame around the mouth.
-    const frameMat = new THREE.LineBasicMaterial({
-      color: goal.sign > 0 ? 0xffa183 : 0x8fd0ff,
-    });
     const hw = goal.width / 2;
     const frame = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(goal.x, 0.05, -hw),
+      new THREE.Vector3(goal.x, 2, -hw),
       new THREE.Vector3(goal.x, goal.height, -hw),
       new THREE.Vector3(goal.x, goal.height, hw),
-      new THREE.Vector3(goal.x, 0.05, hw),
+      new THREE.Vector3(goal.x, 2, hw),
     ]);
-    group.add(new THREE.Line(frame, frameMat));
+    group.add(
+      new THREE.Line(
+        frame,
+        new THREE.LineBasicMaterial({ color: goal.sign > 0 ? 0xffa183 : 0x8fd0ff }),
+      ),
+    );
   }
 
   return group;
 }
 
-/** Grid lines on the floor, clipped to the playing surface. */
-function buildFloorGrid(halfLength: number, halfWidth: number, spacing = 6): THREE.LineSegments {
+/**
+ * Floor grid, centre circle and halfway line. The grid is the main cue for
+ * speed and distance; without it the arena reads as a flat void and nothing
+ * feels fast.
+ */
+function buildFloorMarkings(layout: ArenaLayout): THREE.Group {
+  const group = new THREE.Group();
+  const hl = layout.halfLength;
+  const hw = layout.halfWidth;
+  const spacing = 512;
+  const y = 2;
+
+  const grid: number[] = [];
+  for (let x = -hl; x <= hl + 0.001; x += spacing) grid.push(x, y, -hw, x, y, hw);
+  for (let z = -hw; z <= hw + 0.001; z += spacing) grid.push(-hl, y, z, hl, y, z);
+  const gridGeo = new THREE.BufferGeometry();
+  gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(grid, 3));
+  group.add(
+    new THREE.LineSegments(
+      gridGeo,
+      new THREE.LineBasicMaterial({ color: 0x4f6ba3, transparent: true, opacity: 0.4 }),
+    ),
+  );
+
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x8fa8dc, transparent: true, opacity: 0.75 });
+  const circle: THREE.Vector3[] = [];
+  for (let i = 0; i <= 72; i++) {
+    const a = (i / 72) * Math.PI * 2;
+    circle.push(new THREE.Vector3(Math.cos(a) * 900, y + 1, Math.sin(a) * 900));
+  }
+  group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(circle), lineMat));
+  group.add(
+    new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, y + 1, -hw),
+        new THREE.Vector3(0, y + 1, hw),
+      ]),
+      lineMat,
+    ),
+  );
+
+  return group;
+}
+
+/** Sparse grid on the underside of the ceiling. */
+function buildCeilingGrid(layout: ArenaLayout): THREE.LineSegments {
+  const hl = layout.halfLength;
+  const hw = layout.halfWidth;
+  const y = layout.ceiling - 2;
+  const spacing = 1024;
   const pts: number[] = [];
-  const y = 0.015;
-  for (let x = -halfLength; x <= halfLength + 0.001; x += spacing) {
-    pts.push(x, y, -halfWidth, x, y, halfWidth);
-  }
-  for (let z = -halfWidth; z <= halfWidth + 0.001; z += spacing) {
-    pts.push(-halfLength, y, z, halfLength, y, z);
-  }
+  for (let x = -hl; x <= hl + 0.001; x += spacing) pts.push(x, y, -hw, x, y, hw);
+  for (let z = -hw; z <= hw + 0.001; z += spacing) pts.push(-hl, y, z, hl, y, z);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
   return new THREE.LineSegments(
     geo,
-    new THREE.LineBasicMaterial({ color: 0x4f6ba3, transparent: true, opacity: 0.45 }),
+    new THREE.LineBasicMaterial({ color: 0x5c76ad, transparent: true, opacity: 0.3 }),
   );
 }

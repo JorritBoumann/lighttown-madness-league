@@ -2,39 +2,43 @@ import * as THREE from 'three';
 import { cfg } from '../config';
 import type { BoostPad } from '../physics/boostPads';
 
-/** Blocky but readable car: body, cabin, nose wedge and four wheels. */
+/** Blocky but readable car, sized from the hitbox: body, cabin, nose, wheels. */
 export function createCarMesh(color = 0x4fc3f7): THREE.Group {
-  const he = cfg.car.halfExtents;
+  const h = cfg.car.hitbox;
+  const hx = h.length / 2;
+  const hy = h.height / 2;
+  const hz = h.width / 2;
   const g = new THREE.Group();
 
   const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.5 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(he.x * 2, he.y * 2, he.z * 2), bodyMat);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(h.length, h.height, h.width), bodyMat);
   body.castShadow = true;
   g.add(body);
 
   const cabin = new THREE.Mesh(
-    new THREE.BoxGeometry(he.x * 0.9, he.y * 1.1, he.z * 1.6),
+    new THREE.BoxGeometry(hx * 0.9, hy * 1.1, hz * 1.6),
     new THREE.MeshStandardMaterial({ color: 0x101826, roughness: 0.2, metalness: 0.7 }),
   );
-  cabin.position.set(-he.x * 0.1, he.y * 0.95, 0);
+  cabin.position.set(-hx * 0.1, hy * 0.95, 0);
   cabin.castShadow = true;
   g.add(cabin);
 
   // Nose marker, so which way is forward is never in doubt.
   const nose = new THREE.Mesh(
-    new THREE.BoxGeometry(he.x * 0.35, he.y * 0.5, he.z * 1.7),
+    new THREE.BoxGeometry(hx * 0.3, hy * 0.5, hz * 1.7),
     new THREE.MeshStandardMaterial({ color: 0xf5f7ff, roughness: 0.4 }),
   );
-  nose.position.set(he.x * 0.92, -he.y * 0.1, 0);
+  nose.position.set(hx * 0.92, -hy * 0.1, 0);
   g.add(nose);
 
+  // Wheels at the real suspension positions.
   const wheelMat = new THREE.MeshStandardMaterial({ color: 0x15181f, roughness: 0.9 });
-  const wheelGeo = new THREE.CylinderGeometry(0.33, 0.33, 0.22, 14);
-  for (const sx of [1, -1]) {
+  for (const spec of [cfg.car.frontWheel, cfg.car.rearWheel]) {
+    const geo = new THREE.CylinderGeometry(spec.radius, spec.radius, spec.radius * 0.8, 14);
     for (const sz of [1, -1]) {
-      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      const w = new THREE.Mesh(geo, wheelMat);
       w.rotation.x = Math.PI / 2;
-      w.position.set(sx * he.x * 0.62, -he.y * 0.85, sz * (he.z + 0.03));
+      w.position.set(spec.x, -hy + spec.radius * 0.2, sz * spec.z);
       w.castShadow = true;
       g.add(w);
     }
@@ -42,11 +46,11 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
 
   // Boost flame, hidden until the thrust is on.
   const flame = new THREE.Mesh(
-    new THREE.ConeGeometry(0.3, 1.7, 10),
+    new THREE.ConeGeometry(hz * 0.5, h.length * 0.9, 10),
     new THREE.MeshBasicMaterial({ color: 0xffb648, transparent: true, opacity: 0.9 }),
   );
   flame.rotation.z = Math.PI / 2;
-  flame.position.set(-he.x - 0.85, 0, 0);
+  flame.position.set(-hx - h.length * 0.42, 0, 0);
   flame.visible = false;
   flame.name = 'flame';
   g.add(flame);
@@ -90,9 +94,9 @@ export function createBoostPadVisuals(pads: BoostPad[]): PadVisuals {
 
   const meshes: THREE.Mesh[] = pads.map((pad) => {
     const mesh = pad.big
-      ? new THREE.Mesh(new THREE.CylinderGeometry(0.2, 1.0, 1.8, 16, 1, true), bigMat)
-      : new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.12, 16), smallMat);
-    mesh.position.set(pad.x, pad.big ? 0.9 : 0.06, pad.z);
+      ? new THREE.Mesh(new THREE.CylinderGeometry(20, 100, 180, 16, 1, true), bigMat)
+      : new THREE.Mesh(new THREE.CylinderGeometry(64, 64, 10, 16), smallMat);
+    mesh.position.set(pad.x, pad.big ? 90 : 5, pad.z);
     group.add(mesh);
     return mesh;
   });
@@ -107,7 +111,7 @@ export function createBoostPadVisuals(pads: BoostPad[]): PadVisuals {
         mesh.visible = live;
         if (live && pad.big) {
           mesh.rotation.y = time * 1.6;
-          mesh.position.y = 0.9 + Math.sin(time * 3 + i) * 0.1;
+          mesh.position.y = 90 + Math.sin(time * 3 + i) * 10;
         }
       }
     },

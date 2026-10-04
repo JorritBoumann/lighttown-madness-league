@@ -1,4 +1,3 @@
-import { cfg } from '../config';
 import type { Car } from '../physics/car';
 
 const CIRC = 2 * Math.PI * 52;
@@ -25,7 +24,7 @@ export class Hud {
         <i data-flag="ballcam">Ball cam</i>
       </div>
       <div class="hud-speed">
-        <b data-speed>0</b> <span>km/h</span>
+        <b data-speed>0</b> <span>uu/s</span>
       </div>
       <div class="hud-boost">
         <svg viewBox="0 0 120 120">
@@ -51,9 +50,9 @@ export class Hud {
     this.boostArc.setAttribute('stroke-dashoffset', String(CIRC * (1 - frac)));
     this.boostValue.textContent = String(Math.round(car.boost));
 
-    // Arbitrary but readable: scale world units into a speedo-looking number.
-    const kph = Math.round(car.speed * 8.2);
-    this.speedValue.textContent = String(kph);
+    // Shown in uu/s, the unit everything about Rocket League handling is quoted
+    // in: 1410 is the throttle ceiling, 2200 is supersonic, 2300 is the cap.
+    this.speedValue.textContent = String(Math.round(car.speed));
     this.speedValue.classList.toggle('supersonic', car.isSupersonic);
 
     this.setFlag('ground', car.grounded);
@@ -67,5 +66,4 @@ export class Hud {
   }
 }
 
-/** Kept so the HUD compiles against config even before match state exists. */
-export const hudBoostMax = (): number => cfg.boost.max;
+
