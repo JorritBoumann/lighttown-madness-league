@@ -749,7 +749,11 @@ describe('aerials', () => {
  */
 describe('aerial defence', () => {
   /** A shot lofted over a keeper's head, into its net. Team 1 defends +x. */
-  function lobAtNet(level: number, seed: number): { conceded: boolean; airTouch: boolean } {
+  function lobAtNet(
+    level: number,
+    seed: number,
+    opts: { low?: boolean } = {},
+  ): { conceded: boolean; airTouch: boolean } {
     const rnd = seeded(seed);
     phys = new PhysicsWorld();
     createArena(phys);
@@ -758,14 +762,14 @@ describe('aerial defence', () => {
 
     const bx = 600 + rnd() * 1600;
     const bz = (rnd() * 2 - 1) * 1600;
-    const y0 = 200 + rnd() * 400;
+    const y0 = opts.low ? cfg.ball.radius + rnd() * 60 : 200 + rnd() * 400;
     ball.reset({ x: bx, y: y0, z: bz });
 
     // Solve the loft so the ball *arrives* in the mouth rather than over the
     // bar. Picking an apex and hoping sends every shot into the stands.
-    const flight = 1.5 + rnd() * 0.9;
+    const flight = opts.low ? 1.1 + rnd() * 0.5 : 1.5 + rnd() * 0.9;
     const g = -cfg.physics.gravity;
-    const aimHeight = 120 + rnd() * 380;
+    const aimHeight = opts.low ? cfg.ball.radius + rnd() * 90 : 120 + rnd() * 380;
     ball.body.setLinvel(
       {
         x: (cfg.arena.halfLength - bx) / flight,
@@ -816,6 +820,20 @@ describe('aerial defence', () => {
     // no aerial defence at all and these shots are unreachable from the floor.
     expect(champion).toBeGreaterThan(veteran + 4);
     expect(champion).toBeGreaterThanOrEqual(6);
+  });
+
+  it('leaves the ground route open, so a keeper cannot be unbeatable', () => {
+    // The balance property the boss rounds rest on. A keeper that went up for
+    // everything would make The Lockout — a Champion keeper behind a narrow
+    // net — a wall with no way past. It only leaves the floor for a ball it
+    // cannot drive into, so a low shot is unaffected: measured at the Lockout's
+    // own net, lofted shots went from 94 per cent in to 68, and ground shots
+    // stayed at 99.
+    let scored = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      if (lobAtNet(5, seed, { low: true }).conceded) scored++;
+    }
+    expect(scored).toBeGreaterThanOrEqual(17);
   });
 
   it('saves them by going up, not by standing in the way', () => {

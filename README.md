@@ -500,12 +500,31 @@ nearest, rather than at the opposing goal. A clear that has to reverse the
 ball's sideways motion as well as its approach asks far more of the touch, and
 what it gets wrong it leaves sitting in front of the net it just came from.
 
-**What is not measured.** None of this changes a bot-versus-bot match: with the
-flag on and off, a Champion attacker against a Champion keeper produces
-byte-identical results, because bots shoot low and flat and the threat test
-never fires. It is a change for playing against a human, who lofts. So the
-effect on The Lockout — a Champion keeper behind a narrow net — is real but
-unquantified here. The Wall is a Veteran keeper and is untouched.
+**None of this changes a bot-versus-bot match.** With the flag on and off, a
+Champion attacker against a Champion keeper produces byte-identical results,
+because bots shoot low and flat and the threat test never fires. A full Lockout
+round simulated with a Champion standing in for the player — narrow nets, heavy
+ball, both opponents, and the upgrades a run holds by round 25 — clears 3 times
+in 20 either way, with the keeper never once leaving the ground. It is a change
+for playing against a human, who lofts.
+
+**Which leaves the question of whether The Lockout is still winnable**, since it
+is a Champion keeper behind a net a third narrower. Lofted shots at that net,
+aimed inside the mouth, with the heavy ball:
+
+| | Before | After |
+| --- | --- | --- |
+| Lofted shots scored | 113 / 120 (94%) | **81 / 120 (68%)** |
+| Ground shots scored | 120 / 120 (100%) | **119 / 120 (99%)** |
+
+So the keeper now stops about one lofted shot in three, where it used to stop
+one in seventeen — and the ground route is untouched, because it only leaves the
+floor for a ball it cannot drive into. Two goals in ninety seconds against a
+keeper that saves a third of the lofts and none of the low shots is a harder
+round than it was, and not a wall. That ground route is pinned by a test, since
+it is the property the boss rounds rest on.
+
+The Wall is a Veteran keeper and is untouched.
 
 ## Layout
 
