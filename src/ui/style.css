@@ -1,0 +1,134 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #070910;
+  color: #e8edf7;
+  font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#game { display: block; width: 100vw; height: 100vh; }
+
+#ui { position: fixed; inset: 0; pointer-events: none; }
+
+/* --- HUD --- */
+.hud-boost {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  width: 120px;
+  height: 120px;
+}
+.hud-boost svg { width: 100%; height: 100%; }
+.hud-boost-value {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+
+.hud-speed {
+  position: absolute;
+  left: 28px;
+  bottom: 28px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-speed b { font-size: 34px; font-weight: 650; }
+.hud-speed span { opacity: 0.6; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+.hud-speed .supersonic { color: #ffc14d; }
+
+.hud-flags {
+  position: absolute;
+  left: 28px;
+  bottom: 96px;
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hud-flags i {
+  font-style: normal;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 0.35;
+}
+.hud-flags i.on { opacity: 1; background: rgba(79, 195, 247, 0.28); }
+
+.hud-help {
+  position: absolute;
+  top: 20px;
+  left: 28px;
+  font-size: 12px;
+  line-height: 1.8;
+  opacity: 0.55;
+}
+.hud-help kbd {
+  font: inherit;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- Tweak panel --- */
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: 14px 16px 40px;
+  background: rgba(8, 11, 20, 0.92);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  pointer-events: auto;
+  font-size: 12px;
+}
+.panel[hidden] { display: none !important; }
+.panel h2 { font-size: 13px; margin-bottom: 4px; }
+.panel p.hint { opacity: 0.5; margin-bottom: 12px; font-size: 11px; }
+.panel section { margin-bottom: 14px; }
+.panel section > h3 {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  margin-bottom: 6px;
+}
+.panel label {
+  display: grid;
+  grid-template-columns: 1fr 58px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.panel label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel input[type="range"] { grid-column: 1 / -1; width: 100%; height: 14px; }
+.panel input[type="number"] {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: inherit;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.panel button {
+  pointer-events: auto;
+  background: rgba(79, 195, 247, 0.2);
+  border: 1px solid rgba(79, 195, 247, 0.4);
+  color: inherit;
+  font: inherit;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.panel .row { display: flex; gap: 8px; margin-bottom: 12px; }
