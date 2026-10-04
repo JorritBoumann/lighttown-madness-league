@@ -23,14 +23,15 @@ Build order from the brief, and what exists:
 | 1. Arena, car, ball, camera | Done |
 | 2. Goals, scoring, match flow | Done |
 | 3. AI bots with tiered difficulty | Done |
-| 4. Gauntlet structure and round escalation | Next |
-| 5. Upgrades between rounds | Not started |
+| 4. Gauntlet structure and round escalation | Done |
+| 5. Upgrades between rounds | Next |
 | 6. Boss rounds | Not started |
 | 7. Menus, run summary, polish | Not started |
 
-A match is you against bots, with a countdown, clock, kickoffs, win conditions
-and sudden death. Opponent count and tier come from the `match` block of the
-config for now; the gauntlet will set them per round.
+A run is playable end to end: rounds that escalate, a loss that ends the run,
+and a best run that persists. Between rounds there is a short pause where the
+upgrade pick will go in step 5. Boss rounds are flagged every fifth round but
+do not yet have their own rule set.
 
 ## Controls
 
@@ -98,6 +99,39 @@ the ball is and reports what happened, and the caller does the resetting. That
 is what makes it testable without a physics world, and it is why the gauntlet
 can drive it with whatever rules a round needs.
 
+## The gauntlet
+
+A run is a sequence of rounds cleared back to back. Lose one and the run is
+over; progress resets to nothing.
+
+Difficulty escalates on the three axes the brief asks for, independently:
+
+| | |
+| --- | --- |
+| Opponent skill | Up one tier every three rounds, capped at five |
+| Opponent count | One, then two from round four, three from round nine |
+| Modifiers | None at first, one from round three, two from round eight |
+| Match length | 90 seconds, tightening by three a round to a floor of 60 |
+| Goals needed | First to two, then first to three from round five |
+
+Every round goes to sudden death rather than ending level: a gauntlet has to
+resolve one way or the other, and it is cleared by winning, not by not losing.
+
+Ten modifiers in [`src/state/modifiers.ts`](src/state/modifiers.ts) — narrow and
+tiny goals, heavy, light and giant balls, low and heavy gravity, rationed and no
+boost, a slick floor. Each one unlocks at a round of its own, and two that pull
+the same knob in opposite directions are never picked together.
+
+Modifiers write through [`ConfigOverrides`](src/state/configOverride.ts), which
+keeps a baseline so a round always builds on the values the file shipped with
+rather than on whatever the last round left behind. Most changes are live, but
+goal dimensions are baked into colliders and meshes, so those rebuild the arena.
+
+[`src/state/run.ts`](src/state/run.ts) owns no entities, like `Match`: it is told
+how a round finished and says what happens next. The best run is kept in
+localStorage, guarded so a corrupt record or blocked storage reads as no record
+rather than breaking the game.
+
 ## The AI
 
 [`src/ai/bot.ts`](src/ai/bot.ts) produces a `CarInput`, exactly like the keyboard
@@ -153,7 +187,7 @@ src/
   physics/   rapier world, arena colliders, car, ball, boost pads
   ai/        bots, difficulty tiers, ball prediction
   input/     CarInput contract, keyboard source
-  state/     match flow: clock, score, goals, win conditions
+  state/     match flow, run and rounds, modifiers, persistence
   render/    three scene, meshes, chase camera
   ui/        car HUD, scoreboard and banners, tuning panel
 tests/       headless physics checks (vitest)
@@ -168,7 +202,7 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-107 tests, no browser needed.
+149 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -178,16 +212,18 @@ closed-form values, that a dodge adds its own 500, that roll is far faster than
 pitch or yaw, and that a fast car transitions onto the side wall and climbs it
 with its wheels down.
 
-The match tests run the rules with no physics at all — a ball position and a
-clock is all the state machine needs: full crossing of the line, balls wide of
-the mouth and over the bar, own goal attribution, the kickoff cycle, the goal
-target, time expiry, sudden death, and that nothing scores before kickoff or
-after full time.
+The match, round and run tests run the rules with no physics at all: goal
+detection, own goals, the kickoff cycle, win conditions, sudden death, the
+escalation curve, modifier conflicts, and the best-run record surviving a
+corrupt entry or storage being unavailable. Two of them are guards rather than
+checks: that every round the generator can produce leaves the ball able to fit
+through the goal, and that no bot tier starts a match already hunting boost.
 
 The bot is tested by what it achieves rather than what it intends: put it on the
 pitch with the real physics, seed its randomness so a flaky bot fails rather
 than fails occasionally, and check that it scores, defends, collects boost,
-recovers from a tumble and does not score on itself.
+recovers from a tumble, frees itself from the back of a net, and does not score
+on itself.
 
 ## Debugging
 
@@ -198,7 +234,11 @@ recovers from a tumble and does not score on itself.
   specific situation. `input` takes any subset of `CarInput`, e.g.
   `game.advance(1, { throttle: 1, boost: true })`.
 - `game.debug` exposes `car` (the player's), `cars`, `bots`, `ball`, `arena`,
-  `pads`, `phys` and `match`. It is a live view, not a snapshot: the match is
-  replaced on every restart, so a held reference would go stale.
+  `pads`, `phys`, `match`, `run` and `overrides`. It is a live view, not a
+  snapshot: the match is replaced every round, so a held reference would go
+  stale and quietly report a dead one.
+- `game.restartRun(seed)` makes a run's modifier picks repeatable, which is the
+  only practical way to chase a bug that only shows up in one round's
+  particular combination.
 - `bot.reasoning` shows why a bot chose its current target — alignment, whether
   it is behind the ball, whether it has committed to a shot.

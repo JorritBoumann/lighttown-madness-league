@@ -21,7 +21,7 @@ import { tier, type BotTier } from './tiers';
  * pile of special cases.
  */
 
-export type BotMode = 'attack' | 'defend' | 'collect' | 'recover';
+export type BotMode = 'attack' | 'defend' | 'collect' | 'recover' | 'unstick';
 
 export interface BotWorld {
   ball: BallSnapshot & { radius: number };
@@ -46,6 +46,13 @@ export class Bot {
   /** Current aim scatter, re-rolled on an interval. */
   private aimOffset = 0;
   private aimRolledAt = -Infinity;
+
+  /** How long it has been asking to move without moving. */
+  private stuckFor = 0;
+  /** Time left reversing to get out of whatever it was stuck on. */
+  private unstickFor = 0;
+  /** Time left heading for open space after reversing out. */
+  private clearOutFor = 0;
 
   /** The pad being collected, held for a moment to stop dithering. */
   private targetPad: BoostPad | null = null;
@@ -96,6 +103,17 @@ export class Bot {
       return this.idle();
     }
 
+    this.clearOutFor = Math.max(0, this.clearOutFor - dt);
+
+    // Just backed out of something: head for open space before going back to
+    // the ball, or it drives straight into the same wall again.
+    if (this.clearOutFor > 0 && this.unstickFor <= 0) {
+      this.mode = 'unstick';
+      this.aimAtOpenSpace();
+      this.clampToPitch();
+      return this.driveToTarget(dt, ball);
+    }
+
     this.mode = this.chooseMode(ball, world);
     switch (this.mode) {
       case 'collect':
@@ -110,7 +128,7 @@ export class Bot {
     }
 
     this.clampToPitch();
-    return this.driveToTarget(ball);
+    return this.driveToTarget(dt, ball);
   }
 
   // --- perception ---------------------------------------------------------
@@ -322,6 +340,16 @@ export class Bot {
     return ball.position;
   }
 
+  /**
+   * A point well away from the walls, to drive to after getting unwedged.
+   * Pulls toward the middle of the pitch, which is always open.
+   */
+  private aimAtOpenSpace(): void {
+    const p = this.car.position;
+    const inset = 0.45;
+    this.target.set(p.x * inset, 0, p.z * inset);
+  }
+
   /** Keeps a waypoint on the pitch, so the bot never aims into a wall. */
   private clampToPitch(): void {
     const margin = cfg.car.hitbox.length;
@@ -354,7 +382,7 @@ export class Bot {
   // --- driving -----------------------------------------------------------
 
   /** One steering controller, whatever the target is. */
-  private driveToTarget(ball: BallSnapshot): CarInput {
+  private driveToTarget(dt: number, ball: BallSnapshot): CarInput {
     const a = cfg.ai;
     const t = this.tier;
     const i = this.input;
@@ -373,6 +401,18 @@ export class Bot {
     this.reasoning.distance = distance;
 
     i.steer = clamp(angle * a.steerGain, -1, 1);
+
+    // Already reversing out of something.
+    this.reasoning.unsticking = this.unstickFor > 0;
+    if (this.unstickFor > 0) {
+      this.unstickFor -= dt;
+      i.throttle = -1;
+      // Reversing flips the car's yaw response, so holding the same steer backs
+      // it out while swinging the nose round toward the target.
+      i.drift = false;
+      i.boost = false;
+      return i;
+    }
 
     // Throttle: full ahead unless the target is well off to the side, in which
     // case easing off tightens the turn instead of driving a wide arc.
@@ -405,6 +445,23 @@ export class Bot {
 
     if (t.usesDodges && this.mode === 'attack') {
       this.maybeAerialOrDodge(i, ball, distance, absAngle);
+    }
+
+    // Wedged against something: a wall, a corner, or the inside of a goal.
+    // Only counted when it is actually *asking* to go forward and not going:
+    // braking to turn, and the moment after striking the ball, are both slow on
+    // purpose and are not stuck. Without this a bot that drives into the net
+    // steers into the back of it for the rest of the match and the round can
+    // never finish.
+    if (i.throttle > 0 && this.car.speed < a.stuckSpeed) {
+      this.stuckFor += dt;
+      if (this.stuckFor > a.stuckTime) {
+        this.stuckFor = 0;
+        this.unstickFor = a.unstickTime;
+        this.clearOutFor = a.unstickTime + a.clearOutTime;
+      }
+    } else {
+      this.stuckFor = 0;
     }
 
     return i;
@@ -458,6 +515,8 @@ export class Bot {
     /** Angle to the current target in the car's own frame, radians. */
     targetAngle: 0,
     distance: 0,
+    /** Reversing out of something it got wedged on. */
+    unsticking: false,
   };
 
   /** Wipes the reaction buffer and intentions, for a kickoff. */
@@ -468,6 +527,9 @@ export class Bot {
     this.padPickedAt = -Infinity;
     this.aimRolledAt = -Infinity;
     this.aimOffset = 0;
+    this.stuckFor = 0;
+    this.unstickFor = 0;
+    this.clearOutFor = 0;
     this.mode = 'attack';
   }
 }

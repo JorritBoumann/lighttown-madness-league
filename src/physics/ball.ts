@@ -39,6 +39,10 @@ export class Ball {
     if (Math.abs(this.collider.radius() - cfg.ball.radius) > 1e-4) {
       this.collider.setRadius(cfg.ball.radius);
     }
+    // Round modifiers change the ball's weight, so this has to follow.
+    if (Math.abs(this.body.mass() - cfg.ball.mass) > 1e-4) {
+      this.collider.setMass(cfg.ball.mass);
+    }
   }
 
   update(): void {

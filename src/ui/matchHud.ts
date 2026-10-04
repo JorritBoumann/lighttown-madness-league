@@ -19,6 +19,8 @@ export class MatchHud {
   private bannerTimer = 0;
   /** Set for full time, which stays up until the match restarts. */
   private bannerSticky = false;
+  /** The banner is currently showing the countdown, which has no timeout. */
+  private countdownOwned = false;
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
@@ -55,11 +57,18 @@ export class MatchHud {
       this.clock.classList.toggle('low', match.clock <= 10 && match.running);
     }
 
-    // The countdown owns the banner while it runs.
+    // The countdown owns the banner while it runs, with no timeout of its own.
     if (match.phase === 'countdown') {
       const n = Math.ceil(match.countdownRemaining);
       this.show(n > 0 ? String(n) : 'Go', match.overtime ? 'Sudden death' : '', 0);
+      this.countdownOwned = true;
       return;
+    }
+    // ...so it has to be taken down explicitly when play starts, or "Go" sits
+    // in the middle of the screen for the rest of the match.
+    if (this.countdownOwned) {
+      this.countdownOwned = false;
+      this.hide();
     }
 
     if (this.bannerSticky) return;
@@ -79,6 +88,10 @@ export class MatchHud {
     );
   }
 
+  /**
+   * Full-time banner. Not used by the gauntlet, which says what happened on its
+   * own run card instead; kept for a standalone match.
+   */
   end(result: MatchResult): void {
     const title =
       result.winner === null ? 'Draw' : result.winner === 0 ? 'You win' : 'You lose';
@@ -92,6 +105,7 @@ export class MatchHud {
   /** Clears a sticky banner, for a restart. */
   reset(): void {
     this.bannerSticky = false;
+    this.countdownOwned = false;
     this.hide();
   }
 

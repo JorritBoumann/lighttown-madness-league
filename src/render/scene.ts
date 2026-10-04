@@ -43,7 +43,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   sun.shadow.camera.far = 16000;
   scene.add(sun);
 
-  scene.add(buildArenaMesh());
+  // The arena mesh is owned by the game, not the renderer: a round modifier can
+  // change the goal dimensions, and then it has to be rebuilt.
 
   function resize(): void {
     const w = canvas.clientWidth || window.innerWidth;
@@ -59,7 +60,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 }
 
 /** Visual arena, built from the same layout the colliders use. */
-function buildArenaMesh(): THREE.Group {
+export function buildArenaMesh(): THREE.Group {
   const layout = buildArenaLayout();
   const group = new THREE.Group();
   group.name = 'arena';
@@ -217,4 +218,15 @@ function buildCeilingGrid(layout: ArenaLayout): THREE.LineSegments {
     geo,
     new THREE.LineBasicMaterial({ color: 0x5c76ad, transparent: true, opacity: 0.3 }),
   );
+}
+
+/** Frees a built arena group's geometry and materials before dropping it. */
+export function disposeArenaMesh(group: THREE.Group): void {
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh & { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
+    mesh.geometry?.dispose();
+    const mat = mesh.material;
+    if (Array.isArray(mat)) for (const m of mat) m.dispose();
+    else mat?.dispose();
+  });
 }

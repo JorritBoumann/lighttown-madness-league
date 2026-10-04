@@ -194,3 +194,73 @@ html, body {
   letter-spacing: 0.06em;
   opacity: 0.85;
 }
+
+/* --- Run HUD --- */
+.round-strip {
+  position: absolute;
+  top: 18px;
+  left: 28px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(10, 14, 24, 0.7);
+  border-left: 3px solid #4fc3f7;
+  transition: transform 0.25s ease;
+}
+.round-strip.intro { transform: scale(1.08); }
+.round-no {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.round-no.boss { color: #ffc14d; }
+.round-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+.round-mods { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.round-mods:empty { margin-top: 0; }
+.round-mods i {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: rgba(255, 193, 77, 0.2);
+  border: 1px solid rgba(255, 193, 77, 0.4);
+  color: #ffd98a;
+}
+
+.best-line {
+  position: absolute;
+  top: 18px;
+  right: 28px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.run-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 320px;
+  padding: 24px 32px;
+  text-align: center;
+  border-radius: 10px;
+  background: rgba(8, 11, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.run-card[hidden] { display: none !important; }
+.run-card.best { border-color: rgba(255, 193, 77, 0.6); }
+.run-card-title { font-size: 30px; font-weight: 700; }
+.run-card-body { margin-top: 12px; font-size: 14px; line-height: 1.9; opacity: 0.85; }
+
+/* The round strip sits where the controls help used to; move that down. */
+.hud-help { top: 112px; }

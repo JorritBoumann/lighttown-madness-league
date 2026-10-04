@@ -348,6 +348,61 @@ describe('recovery', () => {
   });
 });
 
+describe('getting unstuck', () => {
+  it('backs out of the net it has driven into', () => {
+    // A bot that wedges itself nose-first in the back of the net steers into it
+    // for the rest of the match, and the round can then never finish. Steering
+    // cannot save it: yaw rate is proportional to speed, so a car pinned at a
+    // standstill cannot turn at all. Reversing is the only way out.
+    ball.reset({ x: 0, y: cfg.ball.radius, z: 0 });
+    const bot = makeBot(3, { x: -5900, z: 0 }, Math.PI);
+    const startX = bot.car.position.x;
+    const dt = cfg.physics.fixedDt;
+    let reversed = false;
+    for (let i = 0; i < Math.round(6 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      if (bot.reasoning.unsticking) reversed = true;
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+    expect(reversed).toBe(true);
+    // And it actually got out, back toward the pitch.
+    expect(bot.car.position.x).toBeGreaterThan(startX + 400);
+  });
+
+  it('does not call itself stuck while it is driving along happily', () => {
+    ball.reset({ x: 0, y: cfg.ball.radius, z: 0 });
+    const bot = makeBot(3, { x: 3000, z: 0 });
+    const dt = cfg.physics.fixedDt;
+    // Skip the first moment, when it is still accelerating from rest.
+    for (let i = 0; i < Math.round(1 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      bot.car.update(dt);
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+    for (let i = 0; i < Math.round(1.5 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      // Braking to turn is slow on purpose and must not read as stuck.
+      expect(bot.reasoning.unsticking).toBe(false);
+      bot.car.update(dt);
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+  });
+});
+
 describe('reaction delay', () => {
   it('acts on a stale ball, so a low tier reacts late', () => {
     // Ball flicks sideways; a delayed bot should still be aiming at the old spot.

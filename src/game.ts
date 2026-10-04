@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { cfg } from './config';
 import { initPhysics, PhysicsWorld, type RAPIER } from './physics/world';
-import { createArena, type Arena } from './physics/arena';
+import { createArena, destroyArena, type Arena } from './physics/arena';
 import { kickoffSpawns, type Spawn } from './core/arenaLayout';
 import { Ball } from './physics/ball';
 import { Car } from './physics/car';
@@ -10,7 +10,7 @@ import { CarBallInteraction } from './physics/carBall';
 import { Keyboard } from './input/keyboard';
 import { emptyInput, type CarInput } from './input/types';
 import { Bot } from './ai/bot';
-import { createRenderer, type Renderer } from './render/scene';
+import { createRenderer, buildArenaMesh, disposeArenaMesh, type Renderer } from './render/scene';
 import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
 import { ChaseCamera } from './render/chaseCamera';
 import { TransformInterpolator } from './core/interpolate';
@@ -19,13 +19,18 @@ import { Hud } from './ui/hud';
 import { MatchHud } from './ui/matchHud';
 import { TweakPanel } from './ui/tweakPanel';
 import { Match, type GoalEvent, type MatchResult } from './state/match';
+import { Run, type RunSummary } from './state/run';
+import type { RoundSpec } from './state/round';
+import { ConfigOverrides } from './state/configOverride';
+import { needsArenaRebuild } from './state/modifiers';
+import { RunHud } from './ui/runHud';
 
 /**
- * Wires the systems together: physics, rendering, input, AI, match flow.
+ * Wires the systems together: physics, rendering, input, AI, match flow, run.
  *
- * Stage 3: a match against bots. The gauntlet's rounds and upgrades hang off
- * this next, and will drive the match rules and bot tiers per round rather than
- * reading the config defaults.
+ * Stage 4: a gauntlet run. Each round builds its own match rules, opponent set
+ * and modifiers from a RoundSpec; losing one ends the run. Upgrades between
+ * rounds are step 5, so for now a cleared round pauses briefly and carries on.
  */
 
 /** Everything that belongs to one car on the pitch. */
@@ -46,7 +51,8 @@ const TEAM_COLOUR = { 0: 0x4fc3f7, 1: 0xff7043 } as const;
 
 export class Game {
   private readonly phys: PhysicsWorld;
-  private readonly arena: Arena;
+  private arena: Arena;
+  private arenaMesh: THREE.Group;
   private readonly ball: Ball;
   private readonly pads: BoostPads;
   private readonly carBall = new CarBallInteraction();
@@ -68,10 +74,17 @@ export class Game {
   private readonly keyboard: Keyboard;
   private readonly hud: Hud;
   private readonly matchHud: MatchHud;
+  private readonly runHud: RunHud;
   private readonly panel: TweakPanel;
   private readonly loop: Loop;
 
   private match!: Match;
+  private run: Run;
+  /** Set to make a run's modifier picks repeatable; see restartRun. */
+  private runSeed: number | null = null;
+  private readonly overrides = new ConfigOverrides();
+  /** Counts down the pause after a cleared round. */
+  private betweenTimer = 0;
   /** Stands in for the keyboard while `advance()` drives the game. */
   private inputOverride: Partial<CarInput> | null = null;
   private time = 0;
@@ -83,6 +96,8 @@ export class Game {
     this.pads = new BoostPads();
 
     this.render = createRenderer(canvas);
+    this.arenaMesh = buildArenaMesh();
+    this.render.scene.add(this.arenaMesh);
     this.chase = new ChaseCamera(this.render.camera);
     this.ballMesh = createBallMesh();
     this.padVisuals = createBoostPadVisuals(this.pads.pads);
@@ -91,17 +106,17 @@ export class Game {
     this.ballInterp.snap(this.ball.position, this.ball.body.rotation());
 
     this.addCar(0, 0, null);
-    for (let i = 0; i < cfg.match.opponents; i++) {
-      this.addCar(1, i, cfg.match.opponentTier);
-    }
 
     this.keyboard = new Keyboard();
     this.hud = new Hud(ui);
     this.matchHud = new MatchHud(ui);
+    this.runHud = new RunHud(ui);
     this.panel = new TweakPanel(ui);
     this.panel.onChange(() => this.syncConfig());
 
-    this.startMatch();
+    this.run = this.makeRun();
+    this.runHud.showBest(this.run.best);
+    this.run.start();
     this.chase.snapTo(this.player.car.position, this.player.car.forward());
 
     this.loop = new Loop(
@@ -158,18 +173,60 @@ export class Game {
     };
   }
 
-  /** Starts a fresh match and puts everyone on the kickoff line. */
-  private startMatch(): void {
-    this.match = new Match(
-      {},
-      {
-        onGoal: (e) => this.onGoal(e),
-        onKickoff: () => this.setUpKickoff(),
-        onEnd: (r) => this.onMatchEnd(r),
-      },
-    );
+  /**
+   * Sets the world up for a round: modifiers, arena, opponents, match rules.
+   *
+   * Modifiers are reverted first, so a round always builds on the config the
+   * file shipped with rather than on whatever the last round left behind.
+   */
+  private applyRound(spec: RoundSpec): void {
+    this.overrides.revert();
+    for (const mod of spec.modifiers) mod.apply(this.overrides);
+
+    // Goal dimensions are baked into colliders and meshes, so those modifiers
+    // need the arena rebuilt rather than a value written.
+    if (needsArenaRebuild(spec.modifiers) || this.rebuiltArena) {
+      this.rebuildArena();
+      this.rebuiltArena = needsArenaRebuild(spec.modifiers);
+    }
+
+    this.setOpponents(spec.opponents, spec.tier);
+    this.syncConfig();
+
+    this.match = new Match(spec.rules, {
+      onGoal: (e) => this.onGoal(e),
+      onKickoff: () => this.setUpKickoff(),
+      onEnd: (r) => this.onMatchEnd(r),
+    });
     this.matchHud.reset();
+    this.runHud.roundStart(spec);
     this.setUpKickoff();
+  }
+
+  /** True while the arena is built at non-default dimensions. */
+  private rebuiltArena = false;
+
+  private rebuildArena(): void {
+    destroyArena(this.phys, this.arena);
+    this.render.scene.remove(this.arenaMesh);
+    disposeArenaMesh(this.arenaMesh);
+    this.arena = createArena(this.phys);
+    this.arenaMesh = buildArenaMesh();
+    this.render.scene.add(this.arenaMesh);
+  }
+
+  /** Adds or removes bot cars so the count matches, and sets their tier. */
+  private setOpponents(count: number, tier: number): void {
+    const bots = this.entries.filter((e) => e.bot !== null);
+    for (let i = bots.length; i < count; i++) this.addCar(1, i, tier);
+    for (let i = bots.length; i > count; i--) {
+      const entry = this.entries.pop();
+      if (!entry) break;
+      this.byCollider.delete(entry.car.collider.handle);
+      this.render.scene.remove(entry.mesh);
+      entry.car.destroy();
+    }
+    for (const entry of this.entries) entry.bot?.setLevel(tier);
   }
 
   private onGoal(event: GoalEvent): void {
@@ -177,7 +234,12 @@ export class Game {
   }
 
   private onMatchEnd(result: MatchResult): void {
-    this.matchHud.end(result);
+    // No match-level win/lose banner: in a gauntlet the run card says what
+    // happened ("Round cleared", "Run over"), and both at once collide.
+    this.run.finishRound(result, this.match.playedSeconds);
+    // A cleared round holds briefly before the next one starts. Step 5 puts the
+    // upgrade pick here instead of a timer.
+    if (this.run.phase === 'between') this.betweenTimer = cfg.match.betweenRounds;
   }
 
   /** Everyone back to their lines, ball on the spot, pads back up. */
@@ -206,7 +268,7 @@ export class Game {
     const phase = this.match.phase;
     // Only 'playing' hands control over. The countdown holds everyone on their
     // line; after a goal the ball keeps rolling for show but nobody drives.
-    const driving = phase === 'playing';
+    const driving = phase === 'playing' && this.run.phase === 'round';
 
     const world = {
       ball: {
@@ -235,7 +297,7 @@ export class Game {
       this.keyboard.read();
     }
 
-    if (phase === 'countdown' || phase === 'ended') {
+    if (phase === 'countdown' || phase === 'ended' || this.run.phase !== 'round') {
       for (const entry of this.entries) this.freeze(entry.car.body);
       this.freeze(this.ball.body);
     }
@@ -252,6 +314,14 @@ export class Game {
     this.drainContactEvents();
 
     this.match.update(dt, { position: this.ball.position, radius: cfg.ball.radius });
+
+    if (this.betweenTimer > 0) {
+      this.betweenTimer -= dt;
+      if (this.betweenTimer <= 0) {
+        this.betweenTimer = 0;
+        this.run.advance();
+      }
+    }
   }
 
   /** Car-on-ball touches get the speed-dependent bounce, and set last touch. */
@@ -300,6 +370,7 @@ export class Game {
     this.handleHotkeys();
     this.hud.update(player.car, this.chase.ballCam);
     this.matchHud.update(this.match, dt);
+    this.runHud.update(this.run, dt);
     this.keyboard.endFrame();
 
     this.render.renderer.render(this.render.scene, this.render.camera);
@@ -308,7 +379,7 @@ export class Game {
   private handleHotkeys(): void {
     if (this.keyboard.wasPressed('KeyT')) this.chase.toggleBallCam();
     if (this.keyboard.wasPressed('KeyP')) this.panel.toggle();
-    if (this.keyboard.wasPressed('KeyR')) this.startMatch();
+    if (this.keyboard.wasPressed('KeyR')) this.restartRun();
     if (this.keyboard.wasPressed('KeyB')) this.ball.reset();
   }
 
@@ -319,9 +390,43 @@ export class Game {
     this.carBall.syncConfig();
   }
 
-  /** Restarts the match from nothing. Bound to R. */
+  /**
+   * Starts a fresh run from round one. Bound to R.
+   *
+   * Pass a seed to make the modifier picks repeatable, which is the only way to
+   * chase a bug that only shows up in one round's particular combination.
+   */
+  restartRun(seed?: number): void {
+    this.betweenTimer = 0;
+    if (seed !== undefined) {
+      this.runSeed = seed;
+      this.run = this.makeRun();
+    }
+    this.runHud.showBest(this.run.best);
+    this.run.start();
+  }
+
+  private makeRun(): Run {
+    const handlers = {
+      onRoundStart: (spec: RoundSpec) => this.applyRound(spec),
+      onRoundCleared: (spec: RoundSpec) => this.runHud.roundCleared(spec),
+      onRunOver: (summary: RunSummary) => {
+        this.runHud.runOver(summary);
+        // The record may have just changed, so refresh the line that shows it.
+        this.runHud.showBest(this.run.best);
+      },
+    };
+    if (this.runSeed === null) return new Run(handlers);
+    let s = this.runSeed >>> 0;
+    return new Run(handlers, () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 0x100000000;
+    });
+  }
+
+  /** Kept for the console and for scripted checks. */
   resetPlay(): void {
-    this.startMatch();
+    this.restartRun();
   }
 
   /**
@@ -373,6 +478,8 @@ export class Game {
     readonly pads: BoostPads;
     readonly phys: PhysicsWorld;
     readonly match: Match;
+    readonly run: Run;
+    readonly overrides: ConfigOverrides;
   } {
     // Getters rather than a snapshot: the match is replaced on every restart,
     // and a held reference to the old one silently reports stale state.
@@ -401,6 +508,12 @@ export class Game {
       },
       get match() {
         return game.match;
+      },
+      get run() {
+        return game.run;
+      },
+      get overrides() {
+        return game.overrides;
       },
     };
   }

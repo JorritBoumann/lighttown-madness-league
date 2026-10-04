@@ -223,6 +223,19 @@ export const config = {
     defendTrigger: 0.25,
     /** Bots re-pick a boost pad no more often than this, to stop dithering. */
     padRepickInterval: 0.8,
+    /** A bot asking for throttle but going slower than this is stuck on
+     *  something: a wall, a corner, or the inside of a goal. */
+    stuckSpeed: 120,
+    /** How long it has to be stuck before it gives up and backs out. */
+    stuckTime: 0.5,
+    /** How long it reverses for once it decides it is stuck. */
+    unstickTime: 0.8,
+    /** After reversing out, it heads for open space for this long before going
+     *  back to the ball. Reversing alone just lets it drive forward on the same
+     *  heading and wedge on the same wall again, which is a loop it never
+     *  leaves: a car at a standstill cannot steer, because yaw rate scales with
+     *  speed. */
+    clearOutTime: 1.3,
     /** Ball within this range outranks any boost detour. */
     collectBallGuard: 1800,
     /** How near the ball a bot has to be for its attack to count as live and
@@ -252,10 +265,9 @@ export const config = {
   },
 
   match: {
-    /** How many bots line up against the player. */
-    opponents: 1,
-    /** Their difficulty tier: see src/ai/tiers.ts. */
-    opponentTier: 2,
+    /** Pause after a cleared round, before the next one starts. Step 5 puts the
+     *  upgrade pick in this gap. */
+    betweenRounds: 3,
     /** Match length in seconds. Gauntlet rounds sit in the 60-90 band. */
     durationSeconds: 90,
     /** Reaching this many goals wins there and then. 0 means time only. */

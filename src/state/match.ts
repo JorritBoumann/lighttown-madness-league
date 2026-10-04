@@ -105,6 +105,13 @@ export class Match {
     return this.phase === 'ended';
   }
 
+  /** Seconds of actual play so far, for run stats. */
+  get playedSeconds(): number {
+    return this.overtime
+      ? this.rules.durationSeconds + this.clock
+      : this.rules.durationSeconds - this.clock;
+  }
+
   /** Seconds left on the countdown, for the HUD. */
   get countdownRemaining(): number {
     return this.phase === 'countdown' ? this.phaseTimer : 0;
