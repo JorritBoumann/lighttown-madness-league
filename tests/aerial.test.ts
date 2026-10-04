@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as THREE from 'three';
 import { cfg } from '../src/config';
-import { pointNoseAt, aerialCost, type AerialGains } from '../src/ai/aerial';
+import {
+  pointNoseAt,
+  aerialCost,
+  climbTime,
+  shouldLaunch,
+  type AerialGains,
+} from '../src/ai/aerial';
 import { FORWARD, UP, RIGHT } from '../src/core/axes';
 import { initPhysics, PhysicsWorld } from '../src/physics/world';
 import { createArena } from '../src/physics/arena';
@@ -185,6 +191,71 @@ describe('whether an aerial is worth starting', () => {
   it('charges nothing extra for a ball the car is already arriving at', () => {
     const coasting = aerialCost({ ...base, climb: 0, distance: 1200, speed: 1200, time: 1 })!;
     expect(coasting).toBeLessThan(0.2);
+  });
+});
+
+describe('how long a climb takes', () => {
+  const base = {
+    height: 600,
+    launchSpeed: 600,
+    boostAccel: 991.667,
+    gravity: 650,
+    turnTime: 0.28,
+  };
+
+  it('takes longer the higher it is', () => {
+    const low = climbTime({ ...base, height: 300 })!;
+    const high = climbTime({ ...base, height: 1200 })!;
+    expect(high).toBeGreaterThan(low);
+  });
+
+  it('includes the time spent turning to point upward', () => {
+    expect(climbTime({ ...base, height: 0 })).toBeCloseTo(base.turnTime, 3);
+  });
+
+  it('is quicker with a stronger jump', () => {
+    const weak = climbTime({ ...base, launchSpeed: 300 })!;
+    const strong = climbTime({ ...base, launchSpeed: 900 })!;
+    expect(strong).toBeLessThan(weak);
+  });
+
+  it('refuses a climb that thrust below gravity cannot make', () => {
+    // Thrust under gravity: only the jump can lift it, and not this far.
+    expect(climbTime({ ...base, boostAccel: 400, height: 3000 })).toBe(null);
+  });
+
+  it('allows a ballistic climb within the jump’s own reach', () => {
+    // 600 up against 650 of gravity peaks at about 277.
+    expect(climbTime({ ...base, boostAccel: 400, height: 200 })).not.toBe(null);
+  });
+});
+
+describe('when to leave the ground', () => {
+  const base = { distance: 1000, speed: 1200, climbSeconds: 1, tolerance: 0.18 };
+
+  it('launches at the distance the climb will drift across', () => {
+    // A car at 1200 climbing for a second covers about 1200 on the way up, so
+    // it should be leaving the ground around there and not next to the ball.
+    expect(shouldLaunch({ ...base, distance: 1200 })).toBe(true);
+    expect(shouldLaunch({ ...base, distance: 2400 })).toBe(false);
+  });
+
+  it('launches from further out when travelling faster', () => {
+    // This is the whole point: the launch distance is a function of speed, and
+    // treating it as a fixed radius is what makes a car sail past the ball.
+    const slow = { ...base, speed: 500 };
+    const fast = { ...base, speed: 2000 };
+    expect(shouldLaunch({ ...slow, distance: 1500 })).toBe(false);
+    expect(shouldLaunch({ ...fast, distance: 1500 })).toBe(true);
+  });
+
+  it('launches from further out when the climb is longer', () => {
+    expect(shouldLaunch({ ...base, distance: 2000, climbSeconds: 1 })).toBe(false);
+    expect(shouldLaunch({ ...base, distance: 2000, climbSeconds: 2 })).toBe(true);
+  });
+
+  it('is already true when standing on the spot', () => {
+    expect(shouldLaunch({ ...base, distance: 0 })).toBe(true);
   });
 });
 

@@ -522,6 +522,125 @@ describe('roles', () => {
   });
 });
 
+describe('aerials', () => {
+  /**
+   * Runs a lofted ball at a bot and reports whether it met it in the air.
+   * Measured across a spread of them rather than one, because a single
+   * favourable scenario would pass with the launch planning removed.
+   */
+  function lofted(level: number, seed: number): { airTouch: boolean; peak: number } {
+    const rnd = seeded(seed);
+    phys = new PhysicsWorld();
+    createArena(phys);
+    ball = new Ball(phys);
+    pads = new BoostPads();
+
+    const bx = -1200 + rnd() * 3400;
+    const bz = (rnd() * 2 - 1) * 2200;
+    ball.reset({ x: bx, y: 700 + rnd() * 900, z: bz });
+    ball.body.setLinvel({ x: (rnd() * 2 - 1) * 500, y: 150 + rnd() * 350, z: (rnd() * 2 - 1) * 500 }, true);
+
+    const bot = makeBot(
+      level,
+      {
+        x: Math.min(4600, bx + 900 + rnd() * 1800),
+        z: Math.max(-3400, Math.min(3400, bz + (rnd() * 2 - 1) * 1400)),
+      },
+      Math.PI,
+      seed,
+    );
+    bot.car.boost = cfg.boost.max;
+
+    const dt = cfg.physics.fixedDt;
+    const bh = ball.collider.handle;
+    const ch = bot.car.collider.handle;
+    let airTouch = false;
+    let peak = 0;
+    for (let i = 0; i < Math.round(7 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      bot.car.update(dt);
+      ball.update();
+      pads.update(dt, [bot.car]);
+      phys.step();
+      phys.events.drainCollisionEvents((h1, h2, started) => {
+        if (!started) return;
+        if ((h1 === bh && h2 === ch) || (h2 === bh && h1 === ch)) {
+          if (bot.car.position.y > 250) airTouch = true;
+        }
+      });
+      peak = Math.max(peak, bot.car.position.y);
+    }
+    return { airTouch, peak };
+  }
+
+  it('meets a lofted ball in the air often enough to be worth doing', () => {
+    let hits = 0;
+    const peaks: number[] = [];
+    for (let seed = 1; seed <= 20; seed++) {
+      const r = lofted(5, seed);
+      if (r.airTouch) hits++;
+      peaks.push(r.peak);
+    }
+    // About a quarter of these connect in the air. Before the launch planning
+    // it was none at all, however many attempts were made.
+    expect(hits).toBeGreaterThanOrEqual(3);
+    // And it is genuinely climbing, not hopping.
+    expect(Math.max(...peaks)).toBeGreaterThan(700);
+  });
+
+  it('stays on the ground at the tiers that do not fly', () => {
+    for (let seed = 1; seed <= 8; seed++) {
+      const r = lofted(2, seed);
+      expect(r.airTouch).toBe(false);
+      expect(r.peak).toBeLessThan(300);
+    }
+  });
+
+  it('will not start an aerial without the boost to finish it', () => {
+    ball.reset({ x: 0, y: 1000, z: 0 });
+    ball.body.setLinvel({ x: 0, y: 200, z: 0 }, true);
+    const bot = makeBot(5, { x: 1500, z: 0 }, Math.PI);
+    bot.car.boost = 0;
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(2 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      expect(bot.mode).not.toBe('aerial');
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+  });
+
+  it('drives instead of flying when the ball will be drivable shortly', () => {
+    // Dropping, and nearly down: there is no reason to leave the ground.
+    ball.reset({ x: 0, y: 380, z: 0 });
+    ball.body.setLinvel({ x: 0, y: -600, z: 0 }, true);
+    const bot = makeBot(5, { x: 900, z: 0 }, Math.PI);
+    bot.car.boost = cfg.boost.max;
+    const dt = cfg.physics.fixedDt;
+    let flew = false;
+    for (let i = 0; i < Math.round(1.2 / dt); i++) {
+      bot.car.input = bot.think(dt, {
+        ball: { position: ball.position, velocity: ball.velocity, radius: cfg.ball.radius },
+        pads: pads.pads,
+      });
+      if (bot.mode === 'aerial') flew = true;
+      bot.car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+    expect(flew).toBe(false);
+  });
+});
+
 describe('getting unstuck', () => {
   it('backs out of the net it has driven into', () => {
     // A bot that wedges itself nose-first in the back of the net steers into it

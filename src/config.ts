@@ -224,20 +224,26 @@ export const config = {
     /** Boost needed in the tank before committing. An aerial that runs dry
      *  halfway up is worse than never starting. */
     aerialMinBoost: 28,
+    /**
+     * If the ball will be down at driving height within this long, and the car
+     * can be there, drive instead.
+     *
+     * Being *able* to fly is not a reason to. With no check like this a bot
+     * goes up for nearly every loose ball, and the chances it gives up on the
+     * ground cost more than the ones it converts in the air.
+     */
+    aerialGroundedWindow: 1.6,
     /** Seconds of a run-up allowed before giving up on the attempt. */
     aerialMaxSetup: 2.2,
     /**
-     * How far sideways an aerial may reach, as a multiple of the climb.
+     * Slack on top of the drift distance when judging whether an interception
+     * is within reach.
      *
-     * The binding constraint is not boost, it is that a long ground run-up
-     * arrives with lateral speed the car cannot shed once airborne: it sails
-     * past the ball and has no way back. Keeping the attempt close to vertical
-     * is what makes the difference between going up for a ball that is coming
-     * to you and setting off across the pitch on spec.
+     * The reach of an aerial is mostly the drift: whatever ground speed the car
+     * launches with, it keeps for the whole climb. This is the margin on top,
+     * for what the boost can add sideways and for the run-up still to come.
      */
-    aerialReachRatio: 1.1,
-    /** And an absolute cap on that reach, however high the ball is. */
-    aerialMaxReach: 1900,
+    aerialMaxReach: 900,
     /** Orientation gains: proportional and damping, aiming and levelling. */
     aerialP: 2.6,
     aerialD: 0.45,
@@ -261,6 +267,12 @@ export const config = {
     aerialClimbBias: 0.9,
     /** Below this much remaining climb it stops biasing and aims true. */
     aerialClimbUntil: 260,
+    /** Upward speed a full jump sequence is worth, for planning the launch. */
+    aerialLaunchSpeed: 600,
+    /** Overhead for rotating nose-up before the thrust starts paying. */
+    aerialTurnTime: 0.28,
+    /** Slack on the launch distance, as a fraction. */
+    aerialLaunchTolerance: 0.18,
     /** Close enough and square enough to flip into the ball for power. */
     dodgeRange: 420,
     dodgeAngle: 0.45,

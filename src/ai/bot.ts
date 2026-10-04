@@ -6,9 +6,9 @@ import { emptyInput } from '../input/types';
 import type { Car } from '../physics/car';
 import type { BoostPad } from '../physics/boostPads';
 import { FORWARD, UP, RIGHT, WORLD_UP } from '../core/axes';
-import { BallPredictor, type BallSnapshot } from './ballPrediction';
+import { BallPredictor, type BallSnapshot, type PredictedSample } from './ballPrediction';
 import { tier, type BotTier } from './tiers';
-import { pointNoseAt, aerialCost, type AerialInputs } from './aerial';
+import { pointNoseAt, aerialCost, climbTime, shouldLaunch, type AerialInputs } from './aerial';
 
 /**
  * Opponent bot.
@@ -75,8 +75,17 @@ export class Bot {
    * moment the prediction wobbles and ends up jumping on the spot instead.
    */
   private aerial: {
-    /** Where to meet the ball. */
+    /** Where to meet the ball, refreshed from the intercept time each frame. */
     target: THREE.Vector3;
+    /**
+     * Seconds until the interception, counted down.
+     *
+     * The commitment is to a *moment*, not to a point and not to a fresh search
+     * every frame. Re-searching picks a near, low sample one frame and a far,
+     * high one the next, and the plan built on top of it — when to launch, how
+     * long the climb is — changes with it, so nothing is ever carried out.
+     */
+    timeToIntercept: number;
     /** Seconds spent on the attempt so far. */
     elapsed: number;
     /** Whether the first jump has been used. */
@@ -599,6 +608,12 @@ export class Bot {
     if (this.car.boost < a.aerialMinBoost) return false;
 
     const samples = this.predictor.predict(ball, Math.max(2.2, this.tier.predictionHorizon));
+
+    // Driving beats flying whenever driving is on. If the ball is going to be
+    // at a height the car can reach from the floor, soon enough to get there,
+    // take that instead.
+    if (this.groundedChanceSoon(samples)) return false;
+
     const p = this.car.position;
     const gravity = -cfg.physics.gravity;
     // What a jump and a double jump are worth, as one upward push.
@@ -611,9 +626,31 @@ export class Bot {
 
       const distance = Math.hypot(sample.position.x - p.x, sample.position.z - p.z);
       const climb = sample.position.y - p.y;
-      // Close to vertical only: see aerialReachRatio for why the limit is a
-      // ratio to the climb rather than a plain distance.
-      if (distance > Math.min(a.aerialMaxReach, climb * a.aerialReachRatio)) continue;
+
+      // How long the climb takes, and therefore how far the car will drift
+      // across while doing it. That drift *is* the lateral reach of an aerial:
+      // a fixed radius around the ball is not a criterion, it is a guess, and
+      // the one here previously was tight enough to make a correct launch
+      // impossible.
+      const climbSeconds = climbTime({
+        height: climb,
+        launchSpeed: jumpSpeed,
+        boostAccel,
+        gravity,
+        turnTime: a.aerialTurnTime,
+      });
+      if (climbSeconds === null) continue;
+      // There has to be time to climb before the ball arrives.
+      if (sample.time < climbSeconds) continue;
+
+      // And the car has to be able to get to the launch point in the time left
+      // over, at a speed that then carries it across.
+      const launchSpeedNow = Math.max(this.car.speed, cfg.car.maxDriveSpeed * 0.5);
+      const drift = launchSpeedNow * climbSeconds;
+      const toLaunch = distance - drift;
+      const timeToLaunch = sample.time - climbSeconds;
+      if (toLaunch > launchSpeedNow * timeToLaunch + a.aerialMaxReach) continue;
+      if (distance > a.aerialMaxReach + drift) continue;
 
       const cost = aerialCost({
         distance,
@@ -630,6 +667,7 @@ export class Bot {
 
       this.aerial = {
         target: new THREE.Vector3(sample.position.x, sample.position.y, sample.position.z),
+        timeToIntercept: sample.time,
         elapsed: 0,
         jumped: false,
         doubleJumped: false,
@@ -641,41 +679,37 @@ export class Bot {
     return false;
   }
 
+  /** Whether the ball will be drivable, and reachable, before long. */
+  private groundedChanceSoon(samples: readonly PredictedSample[]): boolean {
+    const a = cfg.ai;
+    const p = this.car.position;
+    const speed = Math.max(this.car.speed, cfg.car.maxDriveSpeed * 0.5);
+    for (const sample of samples) {
+      if (sample.time > a.aerialGroundedWindow) return false;
+      if (sample.position.y > a.aerialMinHeight) continue;
+      const distance = Math.hypot(sample.position.x - p.x, sample.position.z - p.z);
+      if (distance <= speed * sample.time) return true;
+    }
+    return false;
+  }
+
   /**
-   * Moves the aerial target onto the ball's current path.
+   * Refreshes the aerial target from the committed intercept time.
    *
-   * Picks the earliest sample the car could plausibly still reach, and settles
-   * for the closest approach when none of them are reachable: once committed,
-   * flying at the best available point beats flying at a stale one.
+   * The prediction improves as the moment approaches, so the point moves a
+   * little; the time it is pinned to does not. That is what keeps the launch
+   * distance and the climb estimate talking about the same thing.
    */
-  private updateAerialTarget(ball: BallSnapshot): void {
+  private updateAerialTarget(dt: number, ball: BallSnapshot): void {
     const attempt = this.aerial;
     if (!attempt) return;
-    const samples = this.predictor.predict(ball, 2.5);
-    const p = this.car.position;
-    const speed = Math.max(this.car.speed, 600);
-    const reach = cfg.boost.accel * this.mods().boostAccel;
+    attempt.timeToIntercept -= dt;
+    if (attempt.timeToIntercept <= 0) return;
 
-    let best: { x: number; y: number; z: number } | null = null;
-    let bestMiss = Infinity;
-    for (const sample of samples) {
-      const d = Math.hypot(
-        sample.position.x - p.x,
-        sample.position.y - p.y,
-        sample.position.z - p.z,
-      );
-      const covered = speed * sample.time + 0.5 * reach * sample.time * sample.time;
-      if (covered >= d) {
-        best = sample.position;
-        break;
-      }
-      const miss = d - covered;
-      if (miss < bestMiss) {
-        bestMiss = miss;
-        best = sample.position;
-      }
-    }
-    if (best) attempt.target.set(best.x, best.y, best.z);
+    const step = Math.min(1 / 30, attempt.timeToIntercept);
+    const samples = this.predictor.predict(ball, attempt.timeToIntercept, step);
+    const at = samples[samples.length - 1];
+    if (at) attempt.target.set(at.position.x, at.position.y, at.position.z);
   }
 
   /** Orientation gains, including what the car can actually do in the air. */
@@ -703,6 +737,8 @@ export class Bot {
     if (attempt.elapsed > a.aerialMaxSetup + 2) return false;
     if (attempt.jumped && this.car.grounded && attempt.elapsed > 0.4) return false;
     if (!attempt.jumped && attempt.elapsed > a.aerialMaxSetup) return false;
+    // The moment it was aiming for has passed.
+    if (attempt.timeToIntercept <= -0.3) return false;
     // Ball has come back down to where driving would do.
     if (ball.position.y < a.aerialMinHeight * 0.5 && !attempt.jumped) return false;
     return true;
@@ -723,7 +759,7 @@ export class Bot {
     // attempt started means flying at where it is not: by the time the car is
     // airborne the ball has moved hundreds of units, and the nose never lines
     // up, so it never boosts and never arrives.
-    this.updateAerialTarget(ball);
+    this.updateAerialTarget(dt, ball);
 
     const p = this.car.position;
     const toTarget = this.tmp.set(
@@ -733,16 +769,29 @@ export class Bot {
     );
 
     if (this.car.grounded && !attempt.jumped) {
-      // Still on the floor: drive at the spot under the target, and jump once
-      // the climb is all that is left.
+      // Still on the floor: drive at the spot under the target, and launch at
+      // the distance the climb will drift across rather than when close to it.
       const flat = Math.hypot(toTarget.x, toTarget.z);
       this.target.set(attempt.target.x, 0, attempt.target.z);
       this.clampToPitch();
       const drive = this.driveToTarget(dt, ball);
-      // Jump once the climb is most of what is left. Jumping while still a
-      // long way out means crossing that distance airborne, which costs far
-      // more boost than covering it on the ground.
-      if (flat < Math.max(260, toTarget.y * 0.45)) {
+
+      const climb = climbTime({
+        height: toTarget.y,
+        launchSpeed: a.aerialLaunchSpeed * this.mods().jump,
+        boostAccel: cfg.boost.accel * this.mods().boostAccel,
+        gravity: -cfg.physics.gravity,
+        turnTime: a.aerialTurnTime,
+      });
+      if (
+        climb !== null &&
+        shouldLaunch({
+          distance: flat,
+          speed: this.car.speed,
+          climbSeconds: climb,
+          tolerance: a.aerialLaunchTolerance,
+        })
+      ) {
         drive.jumpPressed = true;
         drive.jumpHeld = true;
         attempt.jumped = true;

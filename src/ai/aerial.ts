@@ -180,3 +180,59 @@ export function aerialCost(opts: {
   const fraction = total / boostAccel;
   return fraction * time;
 }
+
+/**
+ * How long a climb of `height` takes, starting with the upward speed a jump
+ * gives and thrusting the rest of the way.
+ *
+ * Returns null when the climb is beyond what the boost can do at all: with
+ * thrust below gravity the car never gets there however long it is given.
+ */
+export function climbTime(opts: {
+  height: number;
+  launchSpeed: number;
+  boostAccel: number;
+  gravity: number;
+  /** Overhead for rotating to point upward before the thrust is useful. */
+  turnTime: number;
+}): number | null {
+  const { height, launchSpeed, boostAccel, gravity, turnTime } = opts;
+  if (height <= 0) return turnTime;
+  const net = boostAccel - gravity;
+  if (net <= 0) {
+    // Ballistic only: reachable if the jump alone carries it that high.
+    const apex = (launchSpeed * launchSpeed) / (2 * gravity);
+    if (apex < height) return null;
+    return (launchSpeed - Math.sqrt(Math.max(0, launchSpeed * launchSpeed - 2 * gravity * height))) / gravity;
+  }
+  // height = v*t + 0.5*net*t^2, solved for t.
+  const t = (-launchSpeed + Math.sqrt(launchSpeed * launchSpeed + 2 * net * height)) / net;
+  return t + turnTime;
+}
+
+/**
+ * Whether to leave the ground now.
+ *
+ * This is the piece that was missing, and the reason the first version sailed
+ * past every ball it went for. Jumping when *close* to the spot under the ball
+ * is wrong: a car launches with whatever ground speed it had and keeps it, so
+ * it carries on travelling horizontally for the whole climb. The launch has to
+ * happen at the distance that drift will cover — far short of the ball, not
+ * next to it — and the right distance is simply speed times climb time.
+ *
+ * Expressed as a condition rather than a planned moment so it re-checks every
+ * frame, which keeps it right whether the car arrives early or late.
+ */
+export function shouldLaunch(opts: {
+  /** Horizontal distance to the interception. */
+  distance: number;
+  /** The car's current speed. */
+  speed: number;
+  /** Seconds of climbing needed, from climbTime. */
+  climbSeconds: number;
+  /** Slack, as a fraction of the drift distance. */
+  tolerance: number;
+}): boolean {
+  const drift = opts.speed * opts.climbSeconds;
+  return opts.distance <= drift * (1 + opts.tolerance);
+}
