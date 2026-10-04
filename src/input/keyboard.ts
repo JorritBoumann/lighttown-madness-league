@@ -9,6 +9,12 @@ export class Keyboard {
   private readonly down = new Set<string>();
   private readonly pressedThisFrame = new Set<string>();
   private readonly input: CarInput = emptyInput();
+  /**
+   * Jump is latched rather than read per frame. A render frame can run zero
+   * physics steps, and without the latch the tap in that frame would be cleared
+   * before any step saw it, silently eating the jump.
+   */
+  private jumpLatched = false;
 
   constructor(private readonly target: Window = window) {
     target.addEventListener('keydown', this.onDown);
@@ -21,6 +27,7 @@ export class Keyboard {
     const code = e.code;
     this.down.add(code);
     this.pressedThisFrame.add(code);
+    if (code === 'Space') this.jumpLatched = true;
     // Stop the page scrolling out from under the game.
     if (SWALLOW.has(code)) e.preventDefault();
   };
@@ -31,6 +38,7 @@ export class Keyboard {
 
   private onBlur = (): void => {
     this.down.clear();
+    this.jumpLatched = false;
   };
 
   isDown(code: string): boolean {
@@ -42,7 +50,7 @@ export class Keyboard {
     return this.pressedThisFrame.has(code);
   }
 
-  /** Call once per rendered frame, after reading. */
+  /** Call once per rendered frame, after reading the one-shot hotkeys. */
   endFrame(): void {
     this.pressedThisFrame.clear();
   }
@@ -59,7 +67,9 @@ export class Keyboard {
     // In the air W/S pitch and A/D yaw, using the same keys.
     i.pitch = i.throttle;
     i.roll = (this.isDown('KeyE') ? 1 : 0) - (this.isDown('KeyQ') ? 1 : 0);
-    i.jumpPressed = this.wasPressed('Space');
+    // Consumed here, so exactly one physics step acts on each tap.
+    i.jumpPressed = this.jumpLatched;
+    this.jumpLatched = false;
     i.jumpHeld = this.isDown('Space');
     i.boost = this.isDown('ShiftLeft') || this.isDown('ShiftRight');
     i.drift = this.isDown('AltLeft') || this.isDown('AltRight') || this.isDown('KeyC');

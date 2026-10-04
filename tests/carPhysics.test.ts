@@ -265,3 +265,59 @@ function trackApex(seconds: number): number {
   }
   return apex;
 }
+
+describe('recovery', () => {
+  it('rights itself after landing on its roof', () => {
+    // Drop the car upside down.
+    car.reset({ x: 0, y: 6, z: 0 }, 0);
+    car.body.setRotation({ x: 1, y: 0, z: 0, w: 0 }, true); // 180 degrees about x
+    run(4.0);
+    expect(upAxisY(car)).toBeGreaterThan(0.9);
+    expect(car.grounded).toBe(true);
+  });
+
+  it('rights itself after landing on its side', () => {
+    car.reset({ x: 0, y: 6, z: 0 }, 0);
+    const h = Math.PI / 4; // 90 degrees about x
+    car.body.setRotation({ x: Math.sin(h), y: 0, z: 0, w: Math.cos(h) }, true);
+    run(4.0);
+    expect(upAxisY(car)).toBeGreaterThan(0.9);
+  });
+
+  it('recovers from a tumble and ends up driveable', () => {
+    car.reset({ x: 0, y: 9, z: 0 }, 0);
+    car.body.setAngvel({ x: 4, y: 1.5, z: 3 }, true);
+    run(5.0);
+    expect(upAxisY(car)).toBeGreaterThan(0.9);
+    expect(car.grounded).toBe(true);
+    const x0 = car.position.x;
+    run(1.0, { throttle: 1 });
+    expect(Math.abs(car.position.x - x0)).toBeGreaterThan(2);
+  });
+});
+
+describe('wall driving', () => {
+  it('climbs the side wall when carrying boost speed into it', () => {
+    // Line up square at the wall at +z with plenty of run-up.
+    car.reset({ x: 0, y: 1, z: -6 }, -Math.PI / 2);
+    car.boost = 100;
+    run(0.8);
+    let peakY = 0;
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(2.4 / dt); i++) {
+      car.input = { ...emptyInput(), throttle: 1, boost: true };
+      car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+      peakY = Math.max(peakY, car.position.y);
+    }
+    expect(peakY).toBeGreaterThan(4);
+  });
+});
+
+/** World-space Y component of the car's local up axis. 1 = wheels down. */
+function upAxisY(c: Car): number {
+  const r = c.body.rotation();
+  return 1 - 2 * (r.x * r.x + r.z * r.z);
+}

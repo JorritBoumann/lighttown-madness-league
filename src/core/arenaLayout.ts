@@ -12,6 +12,10 @@ export interface Panel {
   half: { x: number; y: number; z: number };
   /** Rotation about the Y axis, radians. */
   yaw: number;
+  /** Optional tilt, for the ramps along the floor-to-wall seam. */
+  pitch?: number;
+  /** Which axis `pitch` turns about. */
+  axis?: 'x' | 'z';
 }
 
 export interface ArenaLayout {
@@ -46,7 +50,7 @@ export function buildArenaLayout(): ArenaLayout {
   for (const s of [1, -1]) {
     panels.push({
       pos: { x: 0, y: h / 2, z: s * (hw + THICK) },
-      half: { x: hl - cut, y: h / 2, z: THICK },
+      half: { x: hl, y: h / 2, z: THICK },
       yaw: 0,
     });
     // Corner panels at 45 degrees, one per corner on this side.
@@ -63,11 +67,11 @@ export function buildArenaLayout(): ArenaLayout {
   // Back walls: three pieces per end, leaving the goal mouth open.
   for (const e of [1, -1]) {
     const x = e * (hl + THICK);
-    const sideW = (a.width - gw) / 2 - cut;
+    const sideW = (a.width - gw) / 2;
     for (const s of [1, -1]) {
       panels.push({
-        pos: { x, y: h / 2, z: s * (gw / 2 + sideW / 2 + cut / 2) },
-        half: { x: THICK, y: h / 2, z: sideW / 2 + cut / 2 },
+        pos: { x, y: h / 2, z: s * (gw / 2 + sideW / 2) },
+        half: { x: THICK, y: h / 2, z: sideW / 2 },
         yaw: 0,
       });
     }
@@ -94,6 +98,44 @@ export function buildArenaLayout(): ArenaLayout {
         half: { x: gd / 2, y: gh / 2, z: THICK },
         yaw: 0,
       });
+    }
+  }
+
+  // Chamfer along the floor-to-wall seam: a 45-degree ramp so a fast car can
+  // transition onto the wall instead of slapping into a right angle.
+  //
+  // Each ramp is a thin slab tilted 45 degrees. The slab's centre has to sit
+  // half a thickness *below* the ramp surface, or its leading edge stands proud
+  // of the floor as a lip the car cannot climb.
+  const ch = a.wallChamfer;
+  if (ch > 0) {
+    const half = (Math.SQRT2 * ch) / 2; // half-length of the sloped face
+    const mid = ch / 2;
+    const k = Math.SQRT1_2 * THICK; // thickness offset along each normal axis
+
+    // Side walls, at z = +/- hw. Ramp normal points up and in toward the pitch.
+    for (const s of [1, -1]) {
+      panels.push({
+        pos: { x: 0, y: mid - k, z: s * (hw - mid) + s * k },
+        half: { x: hl, y: THICK, z: half },
+        yaw: 0,
+        pitch: (-s * Math.PI) / 4,
+        axis: 'x',
+      });
+    }
+
+    // Back walls, at x = +/- hl, in two pieces each so the goal mouth stays clear.
+    for (const e of [1, -1]) {
+      const sideW = (a.width - gw) / 2;
+      for (const s of [1, -1]) {
+        panels.push({
+          pos: { x: e * (hl - mid) + e * k, y: mid - k, z: s * (gw / 2 + sideW / 2) },
+          half: { x: half, y: THICK, z: sideW / 2 },
+          yaw: 0,
+          pitch: (e * Math.PI) / 4,
+          axis: 'z',
+        });
+      }
     }
   }
 

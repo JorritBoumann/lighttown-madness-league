@@ -49,13 +49,23 @@ export const config: Config = {
     driftTurnMultiplier: 1.45,
 
     // --- Ground contact ---
-    /** Ray length below the chassis used to detect ground. */
+    /** Rounds the chassis collider's edges so it slides onto ramps and grazes
+     *  walls instead of catching on a corner. Subtracted from the half-extents,
+     *  so the overall size is unchanged. */
+    colliderRadius: 0.22,
+    /** How far each corner ray looks past ride height before giving up. */
     groundRayLength: 0.95,
-    /** Spring that holds the chassis at ride height above the surface. Stiff
-     *  enough that the collider floats clear of the floor instead of scraping. */
-    rideHeight: 0.62,
-    suspensionStiffness: 620,
-    suspensionDamping: 44,
+    /** Suspension spring per corner, holding that corner at ride height. Four
+     *  rays rather than one means the car pitches and rolls onto slopes. */
+    /** Set so the chassis settles with its wheels on the floor and the body
+     *  clear of it: four corners each push with `compression * stiffness`, so
+     *  resting compression is (gravity + stickForce) / (4 * stiffness). */
+    rideHeight: 0.82,
+    suspensionStiffness: 95,
+    suspensionDamping: 9,
+    /** Where the corner rays sit, as a fraction of the chassis half-extents. */
+    suspensionSpreadX: 0.85,
+    suspensionSpreadZ: 0.95,
     /** Pushes the car into whatever surface it is on, so it can drive up walls. */
     stickForce: 26,
     /** How fast the chassis rotates to match the surface normal. */
@@ -83,6 +93,14 @@ export const config: Config = {
     /** Angular velocity bleed-off in the air. 1 = no damping. */
     airAngularDamping: 0.965,
     maxAngularSpeed: 6.0,
+
+    // --- Self-righting ---
+    /** Below this speed, a car resting on its side or roof rolls itself back
+     *  upright instead of being stuck there. */
+    rightingSpeedLimit: 9,
+    rightingRate: 7,
+    /** Upward acceleration while righting, to lift clear of the surface. */
+    rightingLift: 26,
   },
 
   boost: {
@@ -119,6 +137,9 @@ export const config: Config = {
     wallHeight: 22,
     /** 45-degree corner panels, measured along each axis. */
     cornerCut: 13,
+    /** Height of the 45-degree ramp where the floor meets each wall. Lets a fast
+     *  car transition onto the wall instead of hitting a right angle. */
+    wallChamfer: 3.5,
     ceiling: true,
     goalWidth: 15,
     goalHeight: 6,
@@ -164,10 +185,13 @@ export interface Config {
     lateralGrip: number;
     driftGripMultiplier: number;
     driftTurnMultiplier: number;
+    colliderRadius: number;
     groundRayLength: number;
     rideHeight: number;
     suspensionStiffness: number;
     suspensionDamping: number;
+    suspensionSpreadX: number;
+    suspensionSpreadZ: number;
     stickForce: number;
     surfaceAlignRate: number;
     jumpImpulse: number;
@@ -183,6 +207,9 @@ export interface Config {
     airRollTorque: number;
     airAngularDamping: number;
     maxAngularSpeed: number;
+    rightingSpeedLimit: number;
+    rightingRate: number;
+    rightingLift: number;
   };
   boost: {
     max: number;
@@ -210,6 +237,7 @@ export interface Config {
     width: number;
     wallHeight: number;
     cornerCut: number;
+    wallChamfer: number;
     ceiling: boolean;
     goalWidth: number;
     goalHeight: number;

@@ -44,7 +44,10 @@ export class Car {
 
   // Contact + jump state.
   grounded = false;
+  /** Landed on a side or the roof, with no wheels to drive on. */
+  beached = false;
   private groundNormal = new THREE.Vector3(0, 1, 0);
+  private beachNormal = new THREE.Vector3(0, 1, 0);
   private airTime = 0;
   private jumpsUsed = 0;
   private jumpHoldRemaining = 0;
@@ -59,6 +62,8 @@ export class Car {
   private readonly vel = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
+  private readonly tmp3 = new THREE.Vector3();
+  private readonly cornerVel = new THREE.Vector3();
   private readonly angvel = new THREE.Vector3();
   private readonly alignQ = new THREE.Quaternion();
 
@@ -76,8 +81,9 @@ export class Car {
         .setAngularDamping(0)
         .setCcdEnabled(true),
     );
+    const br = Math.min(cfg.car.colliderRadius, he.y * 0.9);
     this.collider = phys.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(he.x, he.y, he.z)
+      RAPIER.ColliderDesc.roundCuboid(he.x - br, he.y - br, he.z - br, br)
         .setFriction(0.2)
         .setRestitution(0.1)
         .setMass(cfg.car.mass)
@@ -159,12 +165,18 @@ export class Car {
 
     this.flipLock = Math.max(0, this.flipLock - dt);
 
-    this.probeGround();
+    this.probeGround(dt);
 
     if (this.grounded) {
       this.airTime = 0;
       this.jumpsUsed = 0;
       this.driveOnGround(dt);
+    } else if (this.beached) {
+      // Sitting on a side or the roof: roll back onto the wheels, and give the
+      // jump back so the player can always get out of it.
+      this.rightSelf(dt);
+      this.jumpsUsed = 0;
+      this.airTime = 0;
     } else {
       this.airTime += dt;
       // Leaving the ground without jumping still consumes the first jump, so you
@@ -182,31 +194,99 @@ export class Car {
 
   // --- internals ----------------------------------------------------------
 
-  /** Casts down the car's own -up axis so wall and ceiling driving work too. */
-  private probeGround(): void {
+  /**
+   * Four suspension rays, one per corner, cast along the car's own -up axis so
+   * wall and ceiling driving work the same way. Per-corner springs are what let
+   * the car pitch and roll onto a slope instead of butting into it.
+   */
+  private probeGround(dt: number): void {
     const c = cfg.car;
+    const he = c.halfExtents;
     const p = this.body.translation();
     const dir = this.tmp.copy(this.up).negate();
     const reach = c.rideHeight + c.groundRayLength;
-    const hit = this.phys.ray(
-      { x: p.x, y: p.y, z: p.z },
-      { x: dir.x, y: dir.y, z: dir.z },
-      reach,
-      this.body,
-    );
-    if (hit) {
-      this.grounded = hit.distance <= c.rideHeight + 0.35;
-      this.groundNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
-      // A ray that starts inside geometry can report a zero normal.
+
+    let contacts = 0;
+    let nearest = Infinity;
+    this.groundNormal.set(0, 0, 0);
+
+    for (let i = 0; i < 4; i++) {
+      const sx = i < 2 ? 1 : -1;
+      const sz = i % 2 === 0 ? 1 : -1;
+      // Corner position in world space.
+      const corner = this.tmp2
+        .set(p.x, p.y, p.z)
+        .addScaledVector(this.fwd, sx * he.x * c.suspensionSpreadX)
+        .addScaledVector(this.right, sz * he.z * c.suspensionSpreadZ);
+
+      const hit = this.phys.ray(
+        { x: corner.x, y: corner.y, z: corner.z },
+        { x: dir.x, y: dir.y, z: dir.z },
+        reach,
+        this.body,
+      );
+      if (!hit) continue;
+
+      contacts++;
+      nearest = Math.min(nearest, hit.distance);
+      this.groundNormal.x += hit.normal.x;
+      this.groundNormal.y += hit.normal.y;
+      this.groundNormal.z += hit.normal.z;
+
+      // Spring and damper for this corner, applied at the corner so it produces
+      // the pitch and roll the chassis should have.
+      const compression = c.rideHeight - hit.distance;
+      if (compression <= 0) continue;
+      const cornerVel = this.cornerVelocity(corner, p);
+      const normalVel = cornerVel.dot(this.up);
+      const accel = compression * c.suspensionStiffness - normalVel * c.suspensionDamping;
+      if (accel <= 0) continue;
+      const j = accel * cfg.car.mass * dt;
+      this.body.applyImpulseAtPoint(
+        { x: this.up.x * j, y: this.up.y * j, z: this.up.z * j },
+        { x: corner.x, y: corner.y, z: corner.z },
+        true,
+      );
+    }
+
+    if (contacts > 0) {
+      this.groundNormal.normalize();
       if (this.groundNormal.lengthSq() < 1e-6) this.groundNormal.copy(this.up);
-      this.groundDistance = hit.distance;
+      this.groundDistance = nearest;
+      // Two wheels down is enough to drive; one is a scrape, not traction.
+      this.grounded = contacts >= 2 && nearest <= c.rideHeight + 0.4;
     } else {
       this.grounded = false;
       this.groundDistance = Infinity;
     }
+
+    // Land on a side or the roof and the car's own down-rays miss the floor
+    // entirely, so it would never recover. Catch that with a world-space ray.
+    this.beached = false;
+    if (!this.grounded) {
+      const diag = Math.hypot(he.x, he.y, he.z);
+      const rest = this.phys.ray(
+        { x: p.x, y: p.y, z: p.z },
+        { x: 0, y: -1, z: 0 },
+        diag + 0.25,
+        this.body,
+      );
+      if (rest && this.vel.lengthSq() < c.rightingSpeedLimit ** 2) {
+        this.beached = true;
+        this.beachNormal.set(rest.normal.x, rest.normal.y, rest.normal.z);
+        if (this.beachNormal.lengthSq() < 1e-6) this.beachNormal.set(0, 1, 0);
+      }
+    }
   }
 
-  private groundDistance = Infinity;
+  /** Velocity of a world-space point on the chassis, including spin. */
+  private cornerVelocity(corner: THREE.Vector3, centre: RAPIER.Vector): THREE.Vector3 {
+    const r = this.tmp3.set(corner.x - centre.x, corner.y - centre.y, corner.z - centre.z);
+    return this.cornerVel.copy(this.angvel).cross(r).add(this.vel);
+  }
+
+  /** Distance from the nearest corner to the surface. Handy while tuning. */
+  groundDistance = Infinity;
 
   private driveOnGround(dt: number): void {
     const c = cfg.car;
@@ -214,13 +294,13 @@ export class Car {
     const inp = this.input;
     const n = this.groundNormal;
 
-    // Suspension: hold the chassis at ride height above the surface.
-    const compression = c.rideHeight - this.groundDistance;
-    const normalVel = this.vel.dot(n);
-    const springAccel = compression * c.suspensionStiffness - normalVel * c.suspensionDamping;
-    this.vel.addScaledVector(n, springAccel * dt);
+    // The corner impulses have already changed the velocity this step.
+    const lv0 = this.body.linvel();
+    this.vel.set(lv0.x, lv0.y, lv0.z);
 
-    // Press into the surface so the car can carry speed up walls.
+    // The per-corner springs in probeGround() already hold the ride height.
+    // Press into the surface so the car can carry speed up walls and round the
+    // seam ramps without floating off.
     this.vel.addScaledVector(n, -c.stickForce * dt);
 
     // Forward direction projected onto the surface plane.
@@ -303,6 +383,23 @@ export class Car {
     const maxAng = c.maxAngularSpeed;
     if (this.angvel.length() > maxAng) this.angvel.setLength(maxAng);
     this.body.setAngvel({ x: this.angvel.x, y: this.angvel.y, z: this.angvel.z }, true);
+  }
+
+  /** Rolls a beached car back onto its wheels, and lifts it clear as it goes. */
+  private rightSelf(dt: number): void {
+    const c = cfg.car;
+    this.alignQ.setFromUnitVectors(this.up, this.beachNormal);
+    const angle = 2 * Math.acos(clamp(Math.abs(this.alignQ.w), -1, 1));
+    const axisLen = Math.hypot(this.alignQ.x, this.alignQ.y, this.alignQ.z);
+    if (axisLen > 1e-5 && angle > 1e-3) {
+      const k = (angle * c.rightingRate) / axisLen;
+      this.body.setAngvel(
+        { x: this.alignQ.x * k, y: this.alignQ.y * k, z: this.alignQ.z * k },
+        true,
+      );
+    }
+    // A nudge away from the surface, so a roof landing does not grind in place.
+    this.impulseAlong(this.beachNormal, c.rightingLift * dt);
   }
 
   private handleJump(dt: number): void {

@@ -63,6 +63,22 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-Headless Rapier checks on the feel-critical behaviour: ride height, acceleration,
-speed caps, steering, braking, jump height, double jump, flips, boost drain and
-pickup, ball bounce and containment.
+38 tests, no browser needed:
+
+- **Car physics** — ride height and chassis clearance, acceleration, both speed
+  caps, steering, braking, jump height, hold-for-more-height, double jump, flips,
+  boost drain and pad pickup, self-righting from roof/side/tumble, wall climbing.
+- **Keyboard** — key mapping, opposing keys cancelling, and the jump latch.
+- **Loop** — that the simulated time per second of wall clock is the same at
+  30fps and 144fps, and that a long stall cannot spiral.
+- **Arena layout** — no solid panel strays into the playing area.
+
+## Debugging
+
+`window.game` is exposed in the console.
+
+- `game.advance(seconds, input?)` steps the simulation a fixed amount and draws
+  one frame, without waiting on the render loop. Useful for stepping through a
+  specific situation. `input` takes any subset of `CarInput`, e.g.
+  `game.advance(1, { throttle: 1, boost: true })`.
+- `game.debug` exposes `car`, `ball`, `arena`, `pads` and `phys`.

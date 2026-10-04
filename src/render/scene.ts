@@ -22,10 +22,15 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1, 0.1, 600);
   camera.position.set(-20, 8, 0);
 
-  const hemi = new THREE.HemisphereLight(0x8fb6ff, 0x1a2033, 0.75);
+  const hemi = new THREE.HemisphereLight(0xa8c8ff, 0x2a3348, 1.15);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+  // Low fill from the far end, so the car reads against the floor at both ends.
+  const fill = new THREE.DirectionalLight(0x6f9bd8, 0.45);
+  fill.position.set(-50, 20, -20);
+  scene.add(fill);
+
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
   sun.position.set(40, 70, 30);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -59,31 +64,52 @@ function buildArenaMesh(): THREE.Group {
   group.name = 'arena';
 
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x1b2742,
+    color: 0x2c3c61,
     roughness: 0.85,
     metalness: 0.05,
   });
   const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x263455,
-    roughness: 0.6,
-    metalness: 0.15,
-    transparent: true,
-    opacity: 0.92,
+    color: 0x3a4a72,
+    roughness: 0.55,
+    metalness: 0.2,
     side: THREE.DoubleSide,
   });
 
+  // The ceiling is a playable surface but sits between the camera and the pitch,
+  // so it is drawn as a faint shell rather than a solid lid.
+  const ceilingMat = new THREE.MeshStandardMaterial({
+    color: 0x3a4a72,
+    roughness: 0.55,
+    transparent: true,
+    opacity: 0.12,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const ceilingY = cfg.arena.wallHeight + 1;
+
   for (const [i, panel] of layout.panels.entries()) {
     const isFloor = i === 0;
+    const isCeiling = !isFloor && panel.pos.y >= ceilingY - 0.001 && panel.half.x > 10;
     const geo = new THREE.BoxGeometry(panel.half.x * 2, panel.half.y * 2, panel.half.z * 2);
-    const mesh = new THREE.Mesh(geo, isFloor ? floorMat : wallMat);
+    const mesh = new THREE.Mesh(geo, isFloor ? floorMat : isCeiling ? ceilingMat : wallMat);
     mesh.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
-    mesh.rotation.y = panel.yaw;
+    if (panel.pitch) {
+      if (panel.axis === 'z') mesh.rotation.z = panel.pitch;
+      else mesh.rotation.x = panel.pitch;
+    } else {
+      mesh.rotation.y = panel.yaw;
+    }
     mesh.receiveShadow = true;
     group.add(mesh);
   }
 
+  // Floor grid: the main cue for speed and distance. Without it the arena reads
+  // as a flat void and nothing feels fast. Bounded to the pitch, so it does not
+  // poke through the walls.
+  group.add(buildFloorGrid(layout.halfLength, layout.halfWidth));
+
   // Centre circle and halfway line, so you can read your position at a glance.
-  const lineMat = new THREE.LineBasicMaterial({ color: 0x5f7cc0, transparent: true, opacity: 0.55 });
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x7e9ad6, transparent: true, opacity: 0.7 });
   const circlePts: THREE.Vector3[] = [];
   for (let i = 0; i <= 64; i++) {
     const a = (i / 64) * Math.PI * 2;
@@ -130,4 +156,22 @@ function buildArenaMesh(): THREE.Group {
   }
 
   return group;
+}
+
+/** Grid lines on the floor, clipped to the playing surface. */
+function buildFloorGrid(halfLength: number, halfWidth: number, spacing = 6): THREE.LineSegments {
+  const pts: number[] = [];
+  const y = 0.015;
+  for (let x = -halfLength; x <= halfLength + 0.001; x += spacing) {
+    pts.push(x, y, -halfWidth, x, y, halfWidth);
+  }
+  for (let z = -halfWidth; z <= halfWidth + 0.001; z += spacing) {
+    pts.push(-halfLength, y, z, halfLength, y, z);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return new THREE.LineSegments(
+    geo,
+    new THREE.LineBasicMaterial({ color: 0x4f6ba3, transparent: true, opacity: 0.45 }),
+  );
 }
