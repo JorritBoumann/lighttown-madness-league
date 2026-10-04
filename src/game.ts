@@ -23,6 +23,8 @@ import { Run, type RunSummary } from './state/run';
 import type { RoundSpec } from './state/round';
 import { ConfigOverrides } from './state/configOverride';
 import { needsArenaRebuild } from './state/modifiers';
+import { applyUpgrades, type Upgrade } from './state/upgrades';
+import { resetModifiers } from './physics/car';
 import { RunHud } from './ui/runHud';
 
 /**
@@ -82,9 +84,14 @@ export class Game {
   private run: Run;
   /** Set to make a run's modifier picks repeatable; see restartRun. */
   private runSeed: number | null = null;
-  private readonly overrides = new ConfigOverrides();
-  /** Counts down the pause after a cleared round. */
-  private betweenTimer = 0;
+  /** Round modifiers. Reverted and re-applied every round. */
+  private readonly roundOverrides = new ConfigOverrides();
+  /**
+   * Run upgrades that change the world rather than just the player's car.
+   * A separate layer so it can sit on top of the round's modifiers and be
+   * rebuilt in a fixed order.
+   */
+  private readonly runOverrides = new ConfigOverrides();
   /** Stands in for the keyboard while `advance()` drives the game. */
   private inputOverride: Partial<CarInput> | null = null;
   private time = 0;
@@ -180,8 +187,21 @@ export class Game {
    * file shipped with rather than on whatever the last round left behind.
    */
   private applyRound(spec: RoundSpec): void {
-    this.overrides.revert();
-    for (const mod of spec.modifiers) mod.apply(this.overrides);
+    // Unwound in the reverse of the order it was applied, so each layer puts
+    // back exactly what it found.
+    this.runOverrides.revert();
+    this.roundOverrides.revert();
+
+    for (const mod of spec.modifiers) mod.apply(this.roundOverrides);
+
+    // Upgrades go on top of the round's modifiers, and are rebuilt from
+    // standard every round: applying them incrementally would compound an
+    // upgrade the player only took once.
+    resetModifiers(this.player.car.mods);
+    applyUpgrades(this.run.upgrades, {
+      mods: this.player.car.mods,
+      overrides: this.runOverrides,
+    });
 
     // Goal dimensions are baked into colliders and meshes, so those modifiers
     // need the arena rebuilt rather than a value written.
@@ -192,6 +212,7 @@ export class Game {
 
     this.setOpponents(spec.opponents, spec.tier);
     this.syncConfig();
+    this.runHud.showOwned(this.run.upgrades);
 
     this.match = new Match(spec.rules, {
       onGoal: (e) => this.onGoal(e),
@@ -237,9 +258,6 @@ export class Game {
     // No match-level win/lose banner: in a gauntlet the run card says what
     // happened ("Round cleared", "Run over"), and both at once collide.
     this.run.finishRound(result, this.match.playedSeconds);
-    // A cleared round holds briefly before the next one starts. Step 5 puts the
-    // upgrade pick here instead of a timer.
-    if (this.run.phase === 'between') this.betweenTimer = cfg.match.betweenRounds;
   }
 
   /** Everyone back to their lines, ball on the spot, pads back up. */
@@ -314,14 +332,6 @@ export class Game {
     this.drainContactEvents();
 
     this.match.update(dt, { position: this.ball.position, radius: cfg.ball.radius });
-
-    if (this.betweenTimer > 0) {
-      this.betweenTimer -= dt;
-      if (this.betweenTimer <= 0) {
-        this.betweenTimer = 0;
-        this.run.advance();
-      }
-    }
   }
 
   /** Car-on-ball touches get the speed-dependent bounce, and set last touch. */
@@ -381,6 +391,22 @@ export class Game {
     if (this.keyboard.wasPressed('KeyP')) this.panel.toggle();
     if (this.keyboard.wasPressed('KeyR')) this.restartRun();
     if (this.keyboard.wasPressed('KeyB')) this.ball.reset();
+
+    // Between rounds, 1 to 3 take an upgrade. The run waits rather than being
+    // timed out: the pick is the player's, and nothing is lost by waiting.
+    if (this.run.phase === 'between') {
+      for (let i = 0; i < 3; i++) {
+        if (this.keyboard.wasPressed(`Digit${i + 1}`)) {
+          this.pickUpgrade(i);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Takes the nth offered upgrade. Exposed for the console and for tests. */
+  pickUpgrade(index: number): void {
+    this.run.choose(index);
   }
 
   /** Re-reads every tunable that is cached rather than read per step. */
@@ -397,7 +423,6 @@ export class Game {
    * chase a bug that only shows up in one round's particular combination.
    */
   restartRun(seed?: number): void {
-    this.betweenTimer = 0;
     if (seed !== undefined) {
       this.runSeed = seed;
       this.run = this.makeRun();
@@ -409,7 +434,10 @@ export class Game {
   private makeRun(): Run {
     const handlers = {
       onRoundStart: (spec: RoundSpec) => this.applyRound(spec),
-      onRoundCleared: (spec: RoundSpec) => this.runHud.roundCleared(spec),
+      onRoundCleared: (spec: RoundSpec, _stats: unknown, offer: readonly Upgrade[]) =>
+        this.runHud.offerUpgrades(spec, offer),
+      onUpgradeTaken: (_upgrade: Upgrade, owned: readonly Upgrade[]) =>
+        this.runHud.showOwned(owned),
       onRunOver: (summary: RunSummary) => {
         this.runHud.runOver(summary);
         // The record may have just changed, so refresh the line that shows it.
@@ -463,8 +491,13 @@ export class Game {
       player.car.forward(),
       this.ballMesh.position,
     );
+    // Hotkeys and the per-frame input reset run here too, so stepping the game
+    // with advance() goes through the same input path as a real frame.
+    this.handleHotkeys();
     this.hud.update(player.car, this.chase.ballCam);
     this.matchHud.update(this.match, dt);
+    this.runHud.update(this.run, dt);
+    this.keyboard.endFrame();
     this.render.renderer.render(this.render.scene, this.render.camera);
   }
 
@@ -480,6 +513,7 @@ export class Game {
     readonly match: Match;
     readonly run: Run;
     readonly overrides: ConfigOverrides;
+    readonly runOverrides: ConfigOverrides;
   } {
     // Getters rather than a snapshot: the match is replaced on every restart,
     // and a held reference to the old one silently reports stale state.
@@ -513,7 +547,10 @@ export class Game {
         return game.run;
       },
       get overrides() {
-        return game.overrides;
+        return game.roundOverrides;
+      },
+      get runOverrides() {
+        return game.runOverrides;
       },
     };
   }

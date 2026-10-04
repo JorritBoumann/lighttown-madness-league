@@ -40,7 +40,8 @@ export class BoostPads {
         if (dx * dx + dz * dz > radius * radius) continue;
         const full = cfg.boost.max * car.mods.boostMax;
         if (car.boost >= full - 0.001) continue;
-        car.addBoost(pad.big ? cfg.boost.bigPadAmount : cfg.boost.smallPadAmount);
+        const amount = pad.big ? cfg.boost.bigPadAmount : cfg.boost.smallPadAmount;
+        car.addBoost(amount * car.mods.padYield);
         pad.cooldown = pad.big ? cfg.boost.bigPadRespawn : cfg.boost.smallPadRespawn;
         this.justPicked.push({ pad, car });
         break;

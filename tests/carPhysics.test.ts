@@ -437,6 +437,100 @@ describe('boost', () => {
   });
 });
 
+describe('upgrade modifiers', () => {
+  it('Triple Jump gives a third jump that actually lifts the car', () => {
+    const peakWith = (maxJumps: number): number => {
+      car.reset(START, 0);
+      car.mods.maxJumps = maxJumps;
+      run(1.2);
+      const base = car.position.y;
+      // Three jumps, each needing a release in between.
+      let peak = 0;
+      for (let n = 0; n < 3; n++) {
+        run(cfg.physics.fixedDt, { jumpPressed: true, jumpHeld: true });
+        run(0.12, { jumpHeld: true });
+        run(0.12);
+        peak = Math.max(peak, car.position.y);
+      }
+      for (let i = 0; i < 90; i++) {
+        run(1 / 120);
+        peak = Math.max(peak, car.position.y);
+      }
+      return peak - base;
+    };
+    expect(peakWith(3)).toBeGreaterThan(peakWith(2) + 20);
+  });
+
+  it('a jump multiplier raises the jump', () => {
+    const height = (jump: number): number => {
+      car.reset(START, 0);
+      car.mods.jump = jump;
+      run(1.2);
+      const base = car.position.y;
+      run(cfg.physics.fixedDt, { jumpPressed: true, jumpHeld: true });
+      run(cfg.car.jumpHoldTime, { jumpHeld: true });
+      let peak = 0;
+      for (let i = 0; i < 150; i++) {
+        run(1 / 120);
+        peak = Math.max(peak, car.position.y);
+      }
+      return peak - base;
+    };
+    expect(height(1.25)).toBeGreaterThan(height(1) * 1.1);
+  });
+
+  it('a grip multiplier reduces how much the car slides', () => {
+    const slide = (grip: number): number => {
+      car.reset(START, 0);
+      car.mods.grip = grip;
+      run(0.8);
+      run(2.0, { throttle: 1 });
+      run(0.6, { throttle: 1, steer: 1 });
+      const f = car.forward();
+      const v = car.velocity;
+      return Math.abs(-f.z * v.x + f.x * v.z);
+    };
+    expect(slide(1.5)).toBeLessThan(slide(1));
+  });
+
+  it('a boost multiplier raises the top speed reached on boost', () => {
+    const peak = (boostAccel: number, maxSpeed: number): number => {
+      car.reset({ x: -cfg.arena.halfLength + 300, y: 60, z: 0 }, 0);
+      car.mods.boostAccel = boostAccel;
+      car.mods.maxSpeed = maxSpeed;
+      car.boost = cfg.boost.max;
+      run(0.8);
+      return runPeak(3.0, { throttle: 1, boost: true });
+    };
+    expect(peak(1.2, 1.1)).toBeGreaterThan(peak(1, 1));
+  });
+
+  it('a start-boost multiplier is still capped by the tank', () => {
+    car.mods.startBoost = 1000;
+    car.mods.boostMax = 1;
+    car.reset(START, 0);
+    expect(car.boost).toBe(cfg.boost.max);
+  });
+
+  it('pad yield scales what a pad gives', () => {
+    const gained = (padYield: number): number => {
+      const pads = new BoostPads();
+      const pad = pads.pads.find((p) => !p.big && p.x === 0 && p.z === -1024)!;
+      car.reset({ x: pad.x - 1200, y: 60, z: pad.z }, 0);
+      car.mods.padYield = padYield;
+      car.boost = 0;
+      run(0.8, {}, pads);
+      let peak = 0;
+      for (let i = 0; i < 40; i++) {
+        run(0.05, { throttle: 1 }, pads);
+        peak = Math.max(peak, car.boost);
+      }
+      return peak;
+    };
+    expect(gained(2)).toBeGreaterThan(gained(1) * 1.5);
+  });
+});
+
 describe('recovery', () => {
   it('rights itself after landing on its roof', () => {
     car.reset({ x: 0, y: 400, z: 0 }, 0);

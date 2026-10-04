@@ -264,3 +264,69 @@ html, body {
 
 /* The round strip sits where the controls help used to; move that down. */
 .hud-help { top: 112px; }
+
+/* --- Upgrade picker --- */
+.upgrade-picker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  text-align: center;
+}
+.upgrade-picker[hidden] { display: none !important; }
+.picker-title { font-size: 26px; font-weight: 700; }
+.picker-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.picker-options { display: flex; gap: 14px; margin-top: 20px; justify-content: center; }
+.picker-option {
+  width: 196px;
+  padding: 18px 16px 20px;
+  border-radius: 10px;
+  background: rgba(8, 11, 20, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  text-align: left;
+}
+.picker-key {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 10px;
+  border-radius: 5px;
+  background: rgba(79, 195, 247, 0.26);
+  border: 1px solid rgba(79, 195, 247, 0.5);
+  font-size: 12px;
+  font-weight: 650;
+}
+.picker-name { font-size: 16px; font-weight: 650; margin-bottom: 6px; }
+.picker-desc { font-size: 12px; line-height: 1.5; opacity: 0.72; }
+
+.owned-list {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: center;
+  max-width: 60vw;
+}
+.owned-list i {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: rgba(79, 195, 247, 0.16);
+  border: 1px solid rgba(79, 195, 247, 0.34);
+  color: #a9ddf8;
+}

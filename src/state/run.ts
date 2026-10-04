@@ -1,6 +1,7 @@
 import { buildRound, type RoundSpec } from './round';
 import type { MatchResult } from './match';
 import { loadBestRun, saveBestRun, type BestRun } from './persistence';
+import { offerUpgrades, type Upgrade } from './upgrades';
 
 /**
  * A run: a sequence of escalating rounds that have to be cleared back to back.
@@ -15,7 +16,7 @@ export type RunPhase =
   | 'idle'
   /** A round is being played. */
   | 'round'
-  /** Round cleared, picking an upgrade. Step 5 fills this in. */
+  /** Round cleared; the player is choosing an upgrade. */
   | 'between'
   /** Run finished, for better or worse. */
   | 'over';
@@ -40,8 +41,10 @@ export interface RunSummary extends RunStats {
 export interface RunHandlers {
   /** A round is ready to be played. */
   onRoundStart?(spec: RoundSpec): void;
-  /** A round was cleared. */
-  onRoundCleared?(spec: RoundSpec, stats: RunStats): void;
+  /** A round was cleared, and these are the upgrades on offer. */
+  onRoundCleared?(spec: RoundSpec, stats: RunStats, offer: readonly Upgrade[]): void;
+  /** The player took an upgrade. */
+  onUpgradeTaken?(upgrade: Upgrade, owned: readonly Upgrade[]): void;
   onRunOver?(summary: RunSummary): void;
 }
 
@@ -52,6 +55,10 @@ export class Run {
   readonly stats: RunStats = { roundsCleared: 0, goalsFor: 0, goalsAgainst: 0, duration: 0 };
   summary: RunSummary | null = null;
   best: BestRun | null;
+  /** Upgrades taken this run, in the order they were taken. */
+  readonly upgrades: Upgrade[] = [];
+  /** The three on offer while between rounds; empty otherwise. */
+  offer: Upgrade[] = [];
 
   constructor(
     private readonly handlers: RunHandlers = {},
@@ -72,6 +79,8 @@ export class Run {
     this.stats.goalsAgainst = 0;
     this.stats.duration = 0;
     this.summary = null;
+    this.upgrades.length = 0;
+    this.offer = [];
     this.beginRound(1);
   }
 
@@ -89,16 +98,32 @@ export class Run {
     if (result.winner === 0) {
       this.stats.roundsCleared++;
       this.phase = 'between';
-      this.handlers.onRoundCleared?.(this.spec, { ...this.stats });
+      this.offer = offerUpgrades(this.upgrades, 3, this.random);
+      this.handlers.onRoundCleared?.(this.spec, { ...this.stats }, this.offer);
       return;
     }
 
     this.endRun(true);
   }
 
-  /** Moves from the between-rounds screen into the next round. */
+  /**
+   * Takes one of the offered upgrades and starts the next round.
+   * Out-of-range picks are ignored rather than skipping the choice.
+   */
+  choose(index: number): void {
+    if (this.phase !== 'between' || !this.spec) return;
+    const upgrade = this.offer[index];
+    if (!upgrade) return;
+    this.upgrades.push(upgrade);
+    this.handlers.onUpgradeTaken?.(upgrade, this.upgrades);
+    this.offer = [];
+    this.beginRound(this.spec.index + 1);
+  }
+
+  /** Starts the next round without taking anything. */
   advance(): void {
     if (this.phase !== 'between' || !this.spec) return;
+    this.offer = [];
     this.beginRound(this.spec.index + 1);
   }
 

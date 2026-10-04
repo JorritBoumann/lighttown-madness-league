@@ -29,19 +29,60 @@ import { emptyInput } from '../input/types';
  */
 
 
+/**
+ * Per-car multipliers, on top of config.
+ *
+ * This is where run upgrades land. They have to be per-car rather than config
+ * writes, because the config is shared with the bots and an upgrade that made
+ * everyone faster would not be an upgrade.
+ */
 export interface CarModifiers {
-  /** Multipliers applied on top of config, for upgrades and round modifiers. */
   accel: number;
   maxSpeed: number;
   boostAccel: number;
   boostDrain: number;
   turnRate: number;
+  /** Scales both the jump impulse and the held-jump acceleration. */
   jump: number;
   boostMax: number;
+  /** Sideways grip on the ground. */
+  grip: number;
+  /** Pitch, yaw and roll authority in the air. */
+  airControl: number;
+  /** Dodge kick strength. */
+  dodge: number;
+  /** How hard this car's touches hit the ball. */
+  hitPower: number;
+  /** Boost collected from a pad. */
+  padYield: number;
+  /** Jumps available before touching down again. Two is standard. */
+  maxJumps: number;
+  /** Multiplies the boost this car starts a kickoff with, capped at its tank. */
+  startBoost: number;
 }
 
 export function defaultModifiers(): CarModifiers {
-  return { accel: 1, maxSpeed: 1, boostAccel: 1, boostDrain: 1, turnRate: 1, jump: 1, boostMax: 1 };
+  return {
+    accel: 1,
+    maxSpeed: 1,
+    boostAccel: 1,
+    boostDrain: 1,
+    turnRate: 1,
+    jump: 1,
+    boostMax: 1,
+    grip: 1,
+    airControl: 1,
+    dodge: 1,
+    hitPower: 1,
+    padYield: 1,
+    maxJumps: 2,
+    startBoost: 1,
+  };
+}
+
+/** Puts a car's modifiers back to standard, for re-applying a run's upgrades. */
+export function resetModifiers(mods: CarModifiers): void {
+  Object.assign(mods, defaultModifiers());
 }
 
 /** One suspension ray. */
@@ -191,9 +232,14 @@ export class Car {
     return this.speed >= cfg.car.supersonicSpeed;
   }
 
-  /** True while a second jump or dodge is still available. */
+  /** True while another jump or dodge is still available in the air. */
   get canDoubleJump(): boolean {
-    return this.jumpsUsed === 1 && this.airTime < cfg.car.doubleJumpWindow && this.dodgeLock <= 0;
+    return (
+      this.jumpsUsed >= 1 &&
+      this.jumpsUsed < this.mods.maxJumps &&
+      this.airTime < cfg.car.doubleJumpWindow &&
+      this.dodgeLock <= 0
+    );
   }
 
   /** How many wheels are touching. Drives the HUD and the AI's decisions. */
@@ -220,7 +266,10 @@ export class Car {
     this.groundLockout = 0;
     this.jumpHoldRemaining = 0;
     this.jumpConsumed = false;
-    this.boost = cfg.boost.start;
+    this.boost = Math.min(
+      cfg.boost.start * this.mods.startBoost,
+      cfg.boost.max * this.mods.boostMax,
+    );
     for (const w of this.wheels) w.contact = false;
   }
 
@@ -425,7 +474,7 @@ export class Car {
     // A fraction of sideways speed shed per step. Powerslide cuts it right down,
     // which is the whole trick: the car keeps its heading while it slides.
     const lateral = this.vel.dot(planeRight);
-    const grip = inp.drift ? c.handbrakeGrip : c.lateralGrip;
+    const grip = (inp.drift ? c.handbrakeGrip : c.lateralGrip) * m.grip;
     this.vel.addScaledVector(planeRight, -lateral * Math.min(1, grip * 120 * dt));
 
     // Press into the surface so the car holds walls and the seam ramps.
@@ -471,9 +520,10 @@ export class Car {
       // Signs, derived from the axes above: spin about the driver's right pitches
       // the nose down, so stick-forward is positive; spin about the nose rolls
       // the car to its left, so rolling right is negative.
-      this.angvel.addScaledVector(this.right, inp.pitch * c.airPitchAccel * dt);
-      this.angvel.addScaledVector(this.up, inp.steer * c.airYawAccel * dt);
-      this.angvel.addScaledVector(this.fwd, -inp.roll * c.airRollAccel * dt);
+      const air = this.mods.airControl;
+      this.angvel.addScaledVector(this.right, inp.pitch * c.airPitchAccel * air * dt);
+      this.angvel.addScaledVector(this.up, inp.steer * c.airYawAccel * air * dt);
+      this.angvel.addScaledVector(this.fwd, -inp.roll * c.airRollAccel * air * dt);
 
       // Per-axis damping, applied only where there is no input. Holding an axis
       // stays crisp; releasing it settles.
@@ -550,7 +600,7 @@ export class Car {
       } else {
         this.impulseAlong(this.up, c.doubleJumpImpulse * jumpScale);
       }
-      this.jumpsUsed = 2;
+      this.jumpsUsed++;
     }
   }
 
@@ -574,7 +624,7 @@ export class Car {
     // Flatten vertical velocity so a front dodge actually goes forward. That
     // conversion, plus the flat kick, is what makes flipping a way to travel.
     this.vel.addScaledVector(this.up, -this.vel.dot(this.up) * 0.45);
-    this.vel.addScaledVector(kick, c.dodgeImpulse);
+    this.vel.addScaledVector(kick, c.dodgeImpulse * this.mods.dodge);
     this.body.setLinvel({ x: this.vel.x, y: this.vel.y, z: this.vel.z }, true);
 
     // Spin about the axis perpendicular to the kick: pitch for forward and back,

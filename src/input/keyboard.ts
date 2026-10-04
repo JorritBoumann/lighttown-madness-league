@@ -85,6 +85,9 @@ export class Keyboard {
 
 const SWALLOW = new Set([
   'Space',
+  'Digit1',
+  'Digit2',
+  'Digit3',
   'ArrowUp',
   'ArrowDown',
   'ArrowLeft',

@@ -24,14 +24,13 @@ Build order from the brief, and what exists:
 | 2. Goals, scoring, match flow | Done |
 | 3. AI bots with tiered difficulty | Done |
 | 4. Gauntlet structure and round escalation | Done |
-| 5. Upgrades between rounds | Next |
-| 6. Boss rounds | Not started |
+| 5. Upgrades between rounds | Done |
+| 6. Boss rounds | Next |
 | 7. Menus, run summary, polish | Not started |
 
-A run is playable end to end: rounds that escalate, a loss that ends the run,
-and a best run that persists. Between rounds there is a short pause where the
-upgrade pick will go in step 5. Boss rounds are flagged every fifth round but
-do not yet have their own rule set.
+A run is playable end to end: rounds that escalate, an upgrade picked after
+each one, a loss that ends the run, and a best run that persists. Boss rounds
+are flagged every fifth round but do not yet have their own rule set.
 
 ## Controls
 
@@ -46,6 +45,7 @@ do not yet have their own rule set.
 | `T` | Ball cam |
 | `R` | Restart the match |
 | `B` | Reset the ball only |
+| `1` `2` `3` | Take the matching upgrade between rounds |
 | `P` | Tuning panel |
 
 ## Tuning
@@ -132,6 +132,34 @@ how a round finished and says what happens next. The best run is kept in
 localStorage, guarded so a corrupt record or blocked storage reads as no record
 rather than breaking the game.
 
+## Upgrades
+
+Clear a round and three upgrades are offered; take one with `1`, `2` or `3` and
+it lasts the rest of the run. The run waits for the choice rather than timing
+out: nothing is lost by thinking about it.
+
+Fifteen of them in [`src/state/upgrades.ts`](src/state/upgrades.ts) — boost
+strength, capacity and economy, acceleration, top speed, grip, turn rate, jump
+height, dodge power, air control, how hard your touches hit, pad yield, and an
+extra jump. Most stack, and compound when taken twice. The one-offs (Triple
+Jump, Full Tank, Generous Pads) stop being offered once held.
+
+Two things about how they are applied are worth knowing, because the obvious
+approach is wrong in both cases:
+
+- **Upgrades go through the player's own `CarModifiers`, not the config.** The
+  config is shared with the bots, so an upgrade written as a config write would
+  quietly make every opponent faster too. There is a test that no upgrade
+  writes a `car.*` config path for exactly this reason. The one upgrade that
+  deliberately helps everyone, Generous Pads, says so in its description.
+- **They are rebuilt from standard at the start of every round**, rather than
+  applied once when taken. Applying incrementally would compound an upgrade the
+  player took once, a little more every round, for the rest of the run.
+
+Round modifiers and run upgrades are two separate override layers. Each round
+unwinds both, applies the round's modifiers, then applies the run's upgrades on
+top — so the order is fixed and a modifier reverting cannot wipe an upgrade.
+
 ## The AI
 
 [`src/ai/bot.ts`](src/ai/bot.ts) produces a `CarInput`, exactly like the keyboard
@@ -187,7 +215,7 @@ src/
   physics/   rapier world, arena colliders, car, ball, boost pads
   ai/        bots, difficulty tiers, ball prediction
   input/     CarInput contract, keyboard source
-  state/     match flow, run and rounds, modifiers, persistence
+  state/     match flow, run and rounds, modifiers, upgrades, persistence
   render/    three scene, meshes, chase camera
   ui/        car HUD, scoreboard and banners, tuning panel
 tests/       headless physics checks (vitest)
@@ -202,7 +230,7 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-149 tests, no browser needed.
+175 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -210,14 +238,18 @@ that acceleration collapses near the top end, that braking stops the car inside
 half a second, that turn radius widens with speed, that jump heights match their
 closed-form values, that a dodge adds its own 500, that roll is far faster than
 pitch or yaw, and that a fast car transitions onto the side wall and climbs it
-with its wheels down.
+with its wheels down. Upgrade effects are checked the same way: Triple Jump has
+to actually lift the car a third time, more grip has to mean measurably less
+slide.
 
-The match, round and run tests run the rules with no physics at all: goal
-detection, own goals, the kickoff cycle, win conditions, sudden death, the
-escalation curve, modifier conflicts, and the best-run record surviving a
-corrupt entry or storage being unavailable. Two of them are guards rather than
-checks: that every round the generator can produce leaves the ball able to fit
-through the goal, and that no bot tier starts a match already hunting boost.
+The match, round, run and upgrade tests run the rules with no physics at all:
+goal detection, own goals, the kickoff cycle, win conditions, sudden death, the
+escalation curve, modifier conflicts, offer generation, stacking, and the
+best-run record surviving a corrupt entry or storage being unavailable. Several
+are guards rather than checks — that every round the generator can produce
+leaves the ball able to fit through the goal, that no bot tier starts a match
+already hunting boost, that no upgrade touches a config path the bots read, and
+that re-applying a run's upgrades is idempotent.
 
 The bot is tested by what it achieves rather than what it intends: put it on the
 pitch with the real physics, seed its randomness so a flaky bot fails rather
@@ -237,8 +269,9 @@ on itself.
   `pads`, `phys`, `match`, `run` and `overrides`. It is a live view, not a
   snapshot: the match is replaced every round, so a held reference would go
   stale and quietly report a dead one.
-- `game.restartRun(seed)` makes a run's modifier picks repeatable, which is the
-  only practical way to chase a bug that only shows up in one round's
-  particular combination.
+- `game.restartRun(seed)` makes a run's modifier and upgrade picks repeatable,
+  which is the only practical way to chase a bug that only shows up in one
+  round's particular combination.
+- `game.pickUpgrade(i)` takes an offered upgrade without a keypress.
 - `bot.reasoning` shows why a bot chose its current target — alignment, whether
   it is behind the ball, whether it has committed to a shot.

@@ -44,8 +44,9 @@ export class CarBallInteraction {
     if (closing <= 0) return; // moving apart already
 
     const restitution = this.curve.at(closing);
-    // Rapier has already resolved some of the bounce; add the remainder.
-    const extra = closing * restitution;
+    // Rapier has already resolved some of the bounce; add the remainder, scaled
+    // by whatever this car's upgrades say about how hard it hits.
+    const extra = closing * restitution * car.mods.hitPower;
     const j = extra * cfg.ball.mass;
     ball.body.applyImpulse(
       { x: this.normal.x * j, y: this.normal.y * j, z: this.normal.z * j },

@@ -265,9 +265,6 @@ export const config = {
   },
 
   match: {
-    /** Pause after a cleared round, before the next one starts. Step 5 puts the
-     *  upgrade pick in this gap. */
-    betweenRounds: 3,
     /** Match length in seconds. Gauntlet rounds sit in the 60-90 band. */
     durationSeconds: 90,
     /** Reaching this many goals wins there and then. 0 means time only. */
