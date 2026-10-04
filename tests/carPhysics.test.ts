@@ -363,6 +363,69 @@ describe('jumps and dodges', () => {
   });
 });
 
+describe('the second jump, and what makes it a dodge', () => {
+  it('cannot double jump while jump is held down', () => {
+    // The real game's rule, and a trap for anything driving the car
+    // programmatically: holding jump for height blocks the second jump
+    // entirely, so a bot that climbs on a held jump never understands why it
+    // cannot reach anything.
+    run(1.2);
+    run(0.02, { jumpPressed: true, jumpHeld: true });
+    run(0.6, { jumpHeld: true });
+    expect(car.canDoubleJump).toBe(true);
+  });
+
+  it('is a plain jump with the stick centred, and a dodge with it held', () => {
+    const secondJump = (withDirection: boolean): { gainedHeight: number; spin: number } => {
+      car.reset(START, 0);
+      run(1.2);
+      run(0.02, { jumpPressed: true, jumpHeld: true });
+      run(cfg.car.jumpHoldTime, { jumpHeld: true });
+      run(0.06); // release, so the second jump registers
+      const before = car.position.y;
+      run(0.02, {
+        jumpPressed: true,
+        jumpHeld: true,
+        ...(withDirection ? { pitch: -1, throttle: -1 } : {}),
+      });
+      run(0.25);
+      const a = car.body.angvel();
+      return { gainedHeight: car.position.y - before, spin: Math.hypot(a.x, a.y, a.z) };
+    };
+
+    const centred = secondJump(false);
+    const directional = secondJump(true);
+    // A dodge spends itself on spin; a jump spends itself on height.
+    expect(directional.spin).toBeGreaterThan(centred.spin * 2);
+    expect(centred.gainedHeight).toBeGreaterThan(directional.gainedHeight);
+  });
+
+  it('climbs far higher on a centred double jump than a directional one', () => {
+    const peak = (withDirection: boolean): number => {
+      car.reset(START, 0);
+      car.boost = cfg.boost.max;
+      run(1.2);
+      run(0.02, { jumpPressed: true, jumpHeld: true });
+      run(cfg.car.jumpHoldTime, { jumpHeld: true });
+      run(0.06);
+      run(0.02, {
+        jumpPressed: true,
+        jumpHeld: true,
+        ...(withDirection ? { pitch: -1 } : {}),
+      });
+      // Then boost upward, nose already up from the jump.
+      let best = 0;
+      for (let i = 0; i < 90; i++) {
+        car.boost = cfg.boost.max;
+        run(1 / 60, { boost: true, pitch: -0.4 });
+        best = Math.max(best, car.position.y);
+      }
+      return best;
+    };
+    expect(peak(false)).toBeGreaterThan(peak(true));
+  });
+});
+
 describe('air control', () => {
   it('rolls far faster than it pitches or yaws', () => {
     const spinRate = (input: Partial<CarInput>): number => {

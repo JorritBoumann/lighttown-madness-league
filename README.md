@@ -346,8 +346,42 @@ Together they took tier three from 20% to 34%, and restored the ordering, which
 matters more: the aim scatter per tier now shows up as direction error the way
 it was always meant to, from 39 degrees at Rookie to 10 at Champion.
 
-**Where it is still weak:** aerials are a jump at a high ball and nothing more.
-A bot will not go up for a ball that needs real air play, and cannot defend one.
+### Aerials: built, verified, and switched off
+
+There is a full aerial path in [`src/ai/aerial.ts`](src/ai/aerial.ts) and the
+`usesAerials` tier flag, and it is **off for every tier**, because turning it on
+makes bots worse. Measured over fifty lofted balls, a tier-four bot that tries
+touches the ball **eleven** times out of fifty; one that stays on the ground
+touches it **eighteen**. Tightening the trigger until attempts almost never
+happen walks the figure back up toward eighteen, which is the clearest possible
+statement that each attempt is a loss.
+
+The air control underneath does work, and is tested: asked to point somewhere, a
+car gets there and holds it without overshooting, including straight up and
+straight down, and it will climb past a thousand units under boost. Four real
+bugs were found and fixed getting it that far:
+
+- **A directional second jump is a dodge, not a jump.** The bot was holding its
+  nose-up command through the frame it pressed jump again, so the car snapped
+  into a front flip and locked out air control — it was flipping itself
+  nose-down every single time. Peak climb went from 219 units to 490 on that one
+  fix alone, and the isolated controller from 386 to 1455.
+- **Holding jump for height blocks the double jump**, because a car needs it
+  released before the second one registers. The climb now holds, releases, then
+  presses again.
+- **A per-axis `atan2` attitude error is wrong past ninety degrees**: the pitch
+  error of a ball overhead keeps growing as the nose passes vertical instead of
+  reversing, so the car rotated straight through and ended up inverted. It now
+  uses the shortest rotation as an axis and an angle.
+- **The "I am upside down, do nothing" guard was abandoning every aerial.**
+  Pointing the nose up tilts the roof by the same angle, so a sixty degree climb
+  looked identical to falling over.
+
+What is still missing is launch planning: *arriving* at the right place with the
+right velocity. A bot drives to the spot under the ball, keeps its ground speed,
+jumps, and sails past — closest approach about 670 units when it needs 136 to
+make contact. That is a trajectory problem, not a tuning one, and guessing at it
+is what produced the regression. The pieces are in place for whoever picks it up.
 
 ## Layout
 
@@ -357,7 +391,7 @@ src/
   game.ts              wires the systems together
   core/      loop, interpolation, arena geometry, curves, math helpers
   physics/   rapier world, arena colliders, car, ball, boost pads
-  ai/        bots, difficulty tiers, ball prediction
+  ai/        bots, difficulty tiers, ball prediction, air control
   input/     CarInput contract, actions, keyboard and gamepad, merged controls
   state/     match flow, run and rounds, modifiers, upgrades, persistence
   render/    three scene, meshes, chase camera
@@ -374,7 +408,7 @@ The arena's colliders and its meshes are both generated from
 npm test
 ```
 
-255 tests, no browser needed.
+284 tests, no browser needed.
 
 The handling tests check against the published figures rather than just checking
 it does not crash: that throttle tops out at 1410 and boost carries you to 2300,
@@ -403,6 +437,13 @@ leaves the ball able to fit through the goal, that no bot tier starts a match
 already hunting boost, that no upgrade touches a config path the bots read, and
 that re-applying a run's upgrades is idempotent.
 
+The aerial tests fly a real car at a target and check it arrives and stays
+there, at every attitude including straight up — the first version passed every
+test that aimed at forty-five degrees and fell over at ninety, which is why the
+near-vertical cases are now pinned explicitly. Two more pin the car's own rule
+that a second jump with the stick held is a dodge rather than a jump, since that
+distinction cost four rounds of diagnosis.
+
 The gamepad tests matter more than most, because I have no pad to try this with:
 a fake one is just an object returned from `navigator.getGamepads`, which makes
 the whole mapping testable without a device — analog trigger pressure, the
@@ -427,10 +468,11 @@ conversion stays ordered by tier.
 
 Honest list of what is not there, in rough order of how much it matters:
 
-- **Bots cannot play in the air.** An aerial is a jump at a high ball and
-  nothing more: a bot will not go up for a ball that needs real air play, and
-  cannot defend one. No boss leans on this, so it has not bitten, but it is the
-  largest remaining hole in the AI.
+- **Bots do not play in the air.** The machinery exists and the air control
+  works; the decision of when to leave the ground, and arriving with the right
+  speed, does not. It is off by default because enabling it is a measured
+  regression. See the AI section for the numbers and the four bugs fixed on the
+  way. Still the largest hole in the AI.
 - **The gamepad mapping has never been tried on a real pad.** It is tested
   against a faked one down to analog trigger pressure and deadzone curves, and
   driven in the browser through a synthetic pad, but no physical controller has

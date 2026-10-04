@@ -59,6 +59,18 @@ export interface BotTier {
   defends: boolean;
   /** Flips into the ball for power, and jumps at high balls. */
   usesDodges: boolean;
+  /**
+   * Leaves the ground to meet a ball in the air.
+   *
+   * Off everywhere at present. The air control underneath works — a car asked
+   * to point somewhere gets there and holds it, and will climb over a thousand
+   * units under boost — but choosing *when* to go and arriving with the right
+   * speed does not, and measured over fifty lofted balls a bot that tries
+   * touches the ball less often than one that stays down: eleven times out of
+   * fifty against eighteen. Turning it on is a regression until the launch is
+   * planned properly. See README.
+   */
+  usesAerials: boolean;
   /** Powerslides through tight turns. */
   usesPowerslide: boolean;
 }
@@ -79,6 +91,7 @@ export const TIERS: readonly BotTier[] = [
     boostLowMark: 0,
     defends: false,
     usesDodges: false,
+    usesAerials: false,
     usesPowerslide: false,
   },
   {
@@ -95,6 +108,7 @@ export const TIERS: readonly BotTier[] = [
     boostLowMark: 0,
     defends: false,
     usesDodges: false,
+    usesAerials: false,
     usesPowerslide: true,
   },
   {
@@ -111,6 +125,7 @@ export const TIERS: readonly BotTier[] = [
     boostLowMark: 20,
     defends: true,
     usesDodges: true,
+    usesAerials: false,
     usesPowerslide: true,
   },
   {
@@ -127,6 +142,7 @@ export const TIERS: readonly BotTier[] = [
     boostLowMark: 30,
     defends: true,
     usesDodges: true,
+    usesAerials: false,
     usesPowerslide: true,
   },
   {
@@ -146,6 +162,7 @@ export const TIERS: readonly BotTier[] = [
     boostLowMark: 25,
     defends: true,
     usesDodges: true,
+    usesAerials: false,
     usesPowerslide: true,
   },
 ];

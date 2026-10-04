@@ -8,6 +8,7 @@ import type { BoostPad } from '../physics/boostPads';
 import { FORWARD, UP, RIGHT, WORLD_UP } from '../core/axes';
 import { BallPredictor, type BallSnapshot } from './ballPrediction';
 import { tier, type BotTier } from './tiers';
+import { pointNoseAt, aerialCost, type AerialInputs } from './aerial';
 
 /**
  * Opponent bot.
@@ -21,7 +22,7 @@ import { tier, type BotTier } from './tiers';
  * pile of special cases.
  */
 
-export type BotMode = 'attack' | 'defend' | 'collect' | 'recover' | 'unstick';
+export type BotMode = 'attack' | 'defend' | 'collect' | 'recover' | 'unstick' | 'aerial';
 
 /**
  * What a bot is for. Tiers say how good it is; the role says what job it does,
@@ -66,6 +67,29 @@ export class Bot {
   /** Time left heading for open space after reversing out. */
   private clearOutFor = 0;
 
+  /**
+   * The aerial being attempted, if any.
+   *
+   * Held across frames rather than re-decided each step: an aerial is a
+   * commitment, and a bot that re-evaluates it every frame abandons it the
+   * moment the prediction wobbles and ends up jumping on the spot instead.
+   */
+  private aerial: {
+    /** Where to meet the ball. */
+    target: THREE.Vector3;
+    /** Seconds spent on the attempt so far. */
+    elapsed: number;
+    /** Whether the first jump has been used. */
+    jumped: boolean;
+    /** Whether the second jump has been used. */
+    doubleJumped: boolean;
+    /** How long the first jump has been held, for the taller hop. */
+    heldFor: number;
+    /** Frames spent with jump released, so the second one can register. */
+    releasedFor: number;
+  } | null = null;
+  private readonly aim: AerialInputs = { pitch: 0, steer: 0, roll: 0, error: 0 };
+
   /** The pad being collected, held for a moment to stop dithering. */
   private targetPad: BoostPad | null = null;
   private padPickedAt = -Infinity;
@@ -73,6 +97,9 @@ export class Bot {
   /** Scratch. */
   private readonly target = new THREE.Vector3();
   private readonly toTarget = new THREE.Vector3();
+  private readonly tmp = new THREE.Vector3();
+  /** The car's spin, read once a frame for the aerial controller. */
+  private readonly angvel = new THREE.Vector3();
   private readonly fwd = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
@@ -99,6 +126,10 @@ export class Bot {
     this.role = role;
   }
 
+  private mods(): { jump: number; boostAccel: number } {
+    return this.car.mods;
+  }
+
   /** Which end this bot defends. */
   private get ownGoalX(): number {
     return this.car.team === 0 ? -cfg.arena.halfLength : cfg.arena.halfLength;
@@ -116,9 +147,21 @@ export class Bot {
     const ball = this.recallBall();
     const basis = this.readBasis();
 
-    // Upside down or sideways: do nothing but let the car right itself. Driving
-    // or boosting here just makes it worse.
-    if (basis.upness < 0.5 && !this.car.grounded) {
+    // Upside down: do nothing and let the car right itself, since driving or
+    // boosting from there only makes it worse.
+    //
+    // This must not fire during an aerial. Pointing the nose up tilts the roof
+    // away from world up by exactly the same angle, so a 60 degree climb looks
+    // identical to falling over, and the guard used to abandon every aerial at
+    // the moment it started working.
+    if (!this.aerial && basis.upness < 0.5 && !this.car.grounded) {
+      this.mode = 'recover';
+      return this.idle();
+    }
+    if (this.aerial && basis.upness < -0.4 && !this.car.grounded) {
+      // Genuinely inverted mid-aerial: give it up rather than thrusting
+      // downwards.
+      this.aerial = null;
       this.mode = 'recover';
       return this.idle();
     }
@@ -134,7 +177,25 @@ export class Bot {
       return this.driveToTarget(dt, ball);
     }
 
+    // An aerial in progress outranks everything except righting itself.
+    if (this.aerial) {
+      this.aerial.elapsed += dt;
+      if (this.aerialStillOn(ball)) {
+        this.mode = 'aerial';
+        return this.flyAerial(dt, ball);
+      }
+      this.aerial = null;
+    }
+
     this.mode = this.chooseMode(ball, world);
+    if (this.mode === 'attack' && this.tier.usesAerials && this.car.grounded) {
+      const started = this.considerAerial(ball);
+      if (started) {
+        this.mode = 'aerial';
+        return this.flyAerial(dt, ball);
+      }
+    }
+
     switch (this.mode) {
       case 'collect':
         this.aimAtPad(world);
@@ -182,6 +243,8 @@ export class Bot {
     this.fwd.copy(FORWARD).applyQuaternion(this.q);
     this.right.copy(RIGHT).applyQuaternion(this.q);
     this.up.copy(UP).applyQuaternion(this.q);
+    const a = this.car.body.angvel();
+    this.angvel.set(a.x, a.y, a.z);
     return { upness: this.up.dot(WORLD_UP) };
   }
 
@@ -521,6 +584,240 @@ export class Bot {
     return i;
   }
 
+  // --- aerials ------------------------------------------------------------
+
+  /**
+   * Looks for a ball worth leaving the ground for, and commits if there is one.
+   *
+   * Deliberately strict: an aerial that fails leaves the bot airborne, out of
+   * boost and facing the wrong way, which costs far more than the chance was
+   * worth. It has to be high enough to need an aerial at all, far enough ahead
+   * to climb to, and affordable out of the tank.
+   */
+  private considerAerial(ball: BallSnapshot): boolean {
+    const a = cfg.ai;
+    if (this.car.boost < a.aerialMinBoost) return false;
+
+    const samples = this.predictor.predict(ball, Math.max(2.2, this.tier.predictionHorizon));
+    const p = this.car.position;
+    const gravity = -cfg.physics.gravity;
+    // What a jump and a double jump are worth, as one upward push.
+    const jumpSpeed = (cfg.car.jumpImpulse + cfg.car.doubleJumpImpulse) * this.mods().jump;
+    const boostAccel = cfg.boost.accel * this.mods().boostAccel;
+
+    for (const sample of samples) {
+      if (sample.time < a.aerialMinTime) continue;
+      if (sample.position.y < a.aerialMinHeight) continue;
+
+      const distance = Math.hypot(sample.position.x - p.x, sample.position.z - p.z);
+      const climb = sample.position.y - p.y;
+      // Close to vertical only: see aerialReachRatio for why the limit is a
+      // ratio to the climb rather than a plain distance.
+      if (distance > Math.min(a.aerialMaxReach, climb * a.aerialReachRatio)) continue;
+
+      const cost = aerialCost({
+        distance,
+        climb,
+        time: sample.time,
+        speed: this.car.speed,
+        gravity,
+        boostAccel,
+        jumpSpeed,
+      });
+      if (cost === null) continue;
+      // Pay for it out of what is actually in the tank.
+      if (cost * cfg.boost.drainPerSec > this.car.boost) continue;
+
+      this.aerial = {
+        target: new THREE.Vector3(sample.position.x, sample.position.y, sample.position.z),
+        elapsed: 0,
+        jumped: false,
+        doubleJumped: false,
+        heldFor: 0,
+        releasedFor: 0,
+      };
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Moves the aerial target onto the ball's current path.
+   *
+   * Picks the earliest sample the car could plausibly still reach, and settles
+   * for the closest approach when none of them are reachable: once committed,
+   * flying at the best available point beats flying at a stale one.
+   */
+  private updateAerialTarget(ball: BallSnapshot): void {
+    const attempt = this.aerial;
+    if (!attempt) return;
+    const samples = this.predictor.predict(ball, 2.5);
+    const p = this.car.position;
+    const speed = Math.max(this.car.speed, 600);
+    const reach = cfg.boost.accel * this.mods().boostAccel;
+
+    let best: { x: number; y: number; z: number } | null = null;
+    let bestMiss = Infinity;
+    for (const sample of samples) {
+      const d = Math.hypot(
+        sample.position.x - p.x,
+        sample.position.y - p.y,
+        sample.position.z - p.z,
+      );
+      const covered = speed * sample.time + 0.5 * reach * sample.time * sample.time;
+      if (covered >= d) {
+        best = sample.position;
+        break;
+      }
+      const miss = d - covered;
+      if (miss < bestMiss) {
+        bestMiss = miss;
+        best = sample.position;
+      }
+    }
+    if (best) attempt.target.set(best.x, best.y, best.z);
+  }
+
+  /** Orientation gains, including what the car can actually do in the air. */
+  private aerialGains() {
+    const a = cfg.ai;
+    const air = this.car.mods.airControl;
+    return {
+      p: a.aerialP,
+      d: a.aerialD,
+      rollP: a.aerialRollP,
+      rollD: a.aerialRollD,
+      pitchAccel: cfg.car.airPitchAccel * air,
+      yawAccel: cfg.car.airYawAccel * air,
+      rollAccel: cfg.car.airRollAccel * air,
+      maxRate: cfg.car.maxAngularSpeed,
+    };
+  }
+
+  /** Whether the attempt is still worth continuing. */
+  private aerialStillOn(ball: BallSnapshot): boolean {
+    const a = cfg.ai;
+    const attempt = this.aerial;
+    if (!attempt) return false;
+    // Out of time, out of boost, or back on the floor with the ball long gone.
+    if (attempt.elapsed > a.aerialMaxSetup + 2) return false;
+    if (attempt.jumped && this.car.grounded && attempt.elapsed > 0.4) return false;
+    if (!attempt.jumped && attempt.elapsed > a.aerialMaxSetup) return false;
+    // Ball has come back down to where driving would do.
+    if (ball.position.y < a.aerialMinHeight * 0.5 && !attempt.jumped) return false;
+    return true;
+  }
+
+  /**
+   * Runs an aerial: drive under the target, jump, then point the nose at it and
+   * boost. Steering in the air is the orientation controller's job; this
+   * decides when to jump and when to thrust.
+   */
+  private flyAerial(dt: number, ball: BallSnapshot): CarInput {
+    const a = cfg.ai;
+    const attempt = this.aerial!;
+    const i = this.input;
+    Object.assign(i, emptyInput());
+
+    // Re-aim every frame. Flying at the point the ball occupied when the
+    // attempt started means flying at where it is not: by the time the car is
+    // airborne the ball has moved hundreds of units, and the nose never lines
+    // up, so it never boosts and never arrives.
+    this.updateAerialTarget(ball);
+
+    const p = this.car.position;
+    const toTarget = this.tmp.set(
+      attempt.target.x - p.x,
+      attempt.target.y - p.y,
+      attempt.target.z - p.z,
+    );
+
+    if (this.car.grounded && !attempt.jumped) {
+      // Still on the floor: drive at the spot under the target, and jump once
+      // the climb is all that is left.
+      const flat = Math.hypot(toTarget.x, toTarget.z);
+      this.target.set(attempt.target.x, 0, attempt.target.z);
+      this.clampToPitch();
+      const drive = this.driveToTarget(dt, ball);
+      // Jump once the climb is most of what is left. Jumping while still a
+      // long way out means crossing that distance airborne, which costs far
+      // more boost than covering it on the ground.
+      if (flat < Math.max(260, toTarget.y * 0.45)) {
+        drive.jumpPressed = true;
+        drive.jumpHeld = true;
+        attempt.jumped = true;
+      }
+      return drive;
+    }
+
+    let doubleJumpingNow = false;
+
+    // Airborne jump sequence: hold the first jump for its full window, release,
+    // then press again for the second.
+    //
+    // The release is not optional. A car needs jump let go of before the second
+    // one registers, which is the real game's rule, so holding it down for
+    // height blocks the double jump entirely: the bot climbs on one jump and
+    // never understands why it cannot reach anything.
+    if (attempt.jumped && !attempt.doubleJumped) {
+      if (attempt.heldFor < cfg.car.jumpHoldTime) {
+        attempt.heldFor += dt;
+        i.jumpHeld = true;
+      } else if (attempt.releasedFor < a.aerialJumpGap) {
+        attempt.releasedFor += dt;
+        // Jump deliberately not held: this is the gap.
+      } else {
+        i.jumpPressed = true;
+        i.jumpHeld = true;
+        attempt.doubleJumped = true;
+        doubleJumpingNow = true;
+      }
+    }
+
+    // While still well below the target, aim above it: thrust spent climbing is
+    // worth more than thrust spent closing the horizontal gap, which the car
+    // can do on the way down.
+    const climb = toTarget.y;
+    if (climb > a.aerialClimbUntil) {
+      const bias = Math.min(1, climb / 900) * a.aerialClimbBias;
+      toTarget.y += Math.hypot(toTarget.x, toTarget.z) * bias;
+    }
+
+    pointNoseAt(
+      toTarget,
+      this.fwd,
+      this.up,
+      this.right,
+      this.angvel,
+      this.aerialGains(),
+      this.aim,
+    );
+    if (doubleJumpingNow) {
+      // The second jump has to be pressed with the stick centred.
+      //
+      // A directional second jump is a dodge, not a jump: the car snaps into a
+      // flip and locks out air control. Holding a nose-up command through that
+      // frame turns the climb into a front flip, which is exactly nose-down,
+      // and the aerial is over before it began.
+      i.pitch = 0;
+      i.steer = 0;
+      i.roll = 0;
+    } else {
+      i.pitch = this.aim.pitch;
+      i.steer = this.aim.steer;
+      i.roll = this.aim.roll;
+    }
+
+    // Thrust once roughly pointed at the aim direction. While climbing, any
+    // thrust with an upward component is worth having even off-aim: height is
+    // the scarce thing, and waiting for a tidy line wastes the airtime.
+    const climbing = climb > a.aerialClimbUntil;
+    const window = climbing ? a.aerialBoostAngle * 2.2 : a.aerialBoostAngle;
+    const noseUp = this.fwd.y > 0.15;
+    i.boost = this.car.boost > 0 && (this.aim.error < window || (climbing && noseUp));
+    return i;
+  }
+
   /** Jump at a high ball, or flip into a close one for extra power. */
   private maybeAerialOrDodge(
     i: CarInput,
@@ -586,6 +883,7 @@ export class Bot {
     this.stuckFor = 0;
     this.unstickFor = 0;
     this.clearOutFor = 0;
+    this.aerial = null;
     this.mode = this.role === 'keeper' ? 'defend' : 'attack';
   }
 }

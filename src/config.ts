@@ -213,6 +213,54 @@ export const config = {
     /** Ball this high and close gets a jump instead of a drive-through. */
     jumpBallHeight: 260,
     jumpRange: 420,
+
+    // --- Aerials ---
+    /** Ball has to be at least this high to be worth leaving the ground for. */
+    aerialMinHeight: 420,
+    /** And the interception has to be at least this far ahead. Climbing a
+     *  thousand units under boost takes well over a second, so anything
+     *  sooner is an aerial the car cannot physically finish. */
+    aerialMinTime: 1.1,
+    /** Boost needed in the tank before committing. An aerial that runs dry
+     *  halfway up is worse than never starting. */
+    aerialMinBoost: 28,
+    /** Seconds of a run-up allowed before giving up on the attempt. */
+    aerialMaxSetup: 2.2,
+    /**
+     * How far sideways an aerial may reach, as a multiple of the climb.
+     *
+     * The binding constraint is not boost, it is that a long ground run-up
+     * arrives with lateral speed the car cannot shed once airborne: it sails
+     * past the ball and has no way back. Keeping the attempt close to vertical
+     * is what makes the difference between going up for a ball that is coming
+     * to you and setting off across the pitch on spec.
+     */
+    aerialReachRatio: 1.1,
+    /** And an absolute cap on that reach, however high the ball is. */
+    aerialMaxReach: 1900,
+    /** Orientation gains: proportional and damping, aiming and levelling. */
+    aerialP: 2.6,
+    aerialD: 0.45,
+    aerialRollP: 2.2,
+    aerialRollD: 0.38,
+    /** Nose within this many radians of the target before boosting, so it does
+     *  not thrust itself off course while still turning. */
+    aerialBoostAngle: 0.5,
+    /** Jump is released for this long between the first and second jump. A car
+     *  needs it let go of before the second registers. */
+    aerialJumpGap: 0.06,
+    /**
+     * How far above the target to aim while still climbing to it.
+     *
+     * Pointing straight at a ball that is high and ahead splits the thrust
+     * between going up and going along, and the car arrives under the ball
+     * having run out of air. Aiming high first and levelling off later is what
+     * players do, and it is the difference between reaching 200 units and
+     * reaching a thousand.
+     */
+    aerialClimbBias: 0.9,
+    /** Below this much remaining climb it stops biasing and aims true. */
+    aerialClimbUntil: 260,
     /** Close enough and square enough to flip into the ball for power. */
     dodgeRange: 420,
     dodgeAngle: 0.45,
