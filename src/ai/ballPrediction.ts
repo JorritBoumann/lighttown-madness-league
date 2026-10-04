@@ -103,3 +103,49 @@ export function predictAt(ball: BallSnapshot, seconds: number): PredictedSample 
   const samples = new BallPredictor().predict(ball, seconds, Math.min(1 / 30, seconds));
   return samples[samples.length - 1]!;
 }
+
+/** A ball on its way into a net. */
+export interface GoalThreat {
+  /** Seconds until it reaches the goal plane. */
+  time: number;
+  /** How high it crosses, so a defender knows whether driving can reach it. */
+  height: number;
+  /** Where across the mouth it crosses. */
+  z: number;
+}
+
+/**
+ * Whether a predicted path ends up in a particular net, and when.
+ *
+ * Used to decide that a ball is worth leaving the ground for in defence: a
+ * clearance is only worth the boost and the exposure if the ball is actually
+ * going in. The mouth is grown by the ball's radius, since a ball whose centre
+ * passes just outside the post still crosses the line.
+ *
+ * The walk stops at the first sample past the plane rather than looking for the
+ * nearest approach, because the prediction ignores the goal frame: a path that
+ * carries on through the back of the net is the same threat as one that stops
+ * there, and anything after the crossing never happens.
+ */
+export function threatensGoal(opts: {
+  samples: readonly PredictedSample[];
+  /** The defended goal line, signed: the ball crosses it going further out. */
+  goalX: number;
+  /** Half the mouth plus the ball's radius. */
+  halfWidth: number;
+  /** The crossbar plus the ball's radius. */
+  maxHeight: number;
+}): GoalThreat | null {
+  const { samples, goalX, halfWidth, maxHeight } = opts;
+  const side = Math.sign(goalX) || 1;
+  const line = Math.abs(goalX);
+
+  for (const sample of samples) {
+    if (sample.position.x * side < line) continue;
+    // Past the plane. Whether it is a goal is decided here and nowhere later.
+    if (Math.abs(sample.position.z) > halfWidth) return null;
+    if (sample.position.y > maxHeight) return null;
+    return { time: sample.time, height: sample.position.y, z: sample.position.z };
+  }
+  return null;
+}

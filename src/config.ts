@@ -303,6 +303,53 @@ export const config = {
      * difference between meeting the ball and shooting.
      */
     aerialStrikeTime: 0.45,
+
+    /**
+     * How far ahead a defender looks for a shot heading into its own net.
+     *
+     * Longer than the attacking horizon: the whole value of a defensive aerial
+     * is seeing the shot early enough to climb into its path, and a ball
+     * crossing the line in a second is already past saving.
+     */
+    aerialSaveHorizon: 3.2,
+    /**
+     * How much of the boost in the tank a save may spend, against the strict
+     * budget an attacking aerial gets.
+     *
+     * An attacking aerial that fails costs a chance; a save that is not
+     * attempted costs the run. Worth emptying the tank for.
+     */
+    aerialSaveBudget: 1.5,
+    /**
+     * Lowest ball a defender will leave the ground for, as a fraction of the
+     * attacking threshold.
+     *
+     * Lower, because the question is not "is this high" but "can I get to it
+     * any other way": a shot at 300 units that the car cannot drive into in
+     * time still has to be met in the air.
+     */
+    aerialSaveHeight: 0.6,
+    /** Latest a save can be started and still get in the way. */
+    aerialSaveMinTime: 0.75,
+    /**
+     * How far in front of the crossing a save aims to make contact.
+     *
+     * Interceptions are taken as late as possible, so this is the only thing
+     * keeping the touch from happening on the goal line itself, where a miss
+     * by a hair is a goal and a touch that is slightly late carries the ball
+     * over with it.
+     */
+    aerialSaveMargin: 0.25,
+    /**
+     * Where a clearance is aimed, across the pitch and up.
+     *
+     * Not at the opposing net: a weak clear up the middle sits the ball back in
+     * front of the net it just left. Aimed up-field, high, and toward the wall
+     * the ball is already nearest, so the touch does not have to reverse its
+     * sideways motion as well as its approach.
+     */
+    aerialClearWide: 0.55,
+    aerialClearHeight: 0.38,
     /** Upward speed a full jump sequence is worth, for planning the launch. */
     aerialLaunchSpeed: 600,
     /** Overhead for rotating nose-up before the thrust starts paying. */

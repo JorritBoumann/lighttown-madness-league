@@ -67,6 +67,16 @@ export interface BotTier {
    * tiers predictable to play against.
    */
   usesAerials: boolean;
+  /**
+   * Leaves the ground to cut out a shot heading into its own net.
+   *
+   * The top tier only, and deliberately the last thing a bot learns. Going up
+   * in defence is the riskiest thing in the game: miss, and the car is behind
+   * the play, out of boost, with the ball in an empty net. A Veteran attacking
+   * in the air and still defending on the floor is a recognisable kind of
+   * player; one that saves in the air is a better one.
+   */
+  defendsAerially: boolean;
   /** Powerslides through tight turns. */
   usesPowerslide: boolean;
 }
@@ -88,6 +98,7 @@ export const TIERS: readonly BotTier[] = [
     defends: false,
     usesDodges: false,
     usesAerials: false,
+    defendsAerially: false,
     usesPowerslide: false,
   },
   {
@@ -105,6 +116,7 @@ export const TIERS: readonly BotTier[] = [
     defends: false,
     usesDodges: false,
     usesAerials: false,
+    defendsAerially: false,
     usesPowerslide: true,
   },
   {
@@ -122,6 +134,7 @@ export const TIERS: readonly BotTier[] = [
     defends: true,
     usesDodges: true,
     usesAerials: false,
+    defendsAerially: false,
     usesPowerslide: true,
   },
   {
@@ -139,6 +152,7 @@ export const TIERS: readonly BotTier[] = [
     defends: true,
     usesDodges: true,
     usesAerials: true,
+    defendsAerially: false,
     usesPowerslide: true,
   },
   {
@@ -159,6 +173,7 @@ export const TIERS: readonly BotTier[] = [
     defends: true,
     usesDodges: true,
     usesAerials: true,
+    defendsAerially: true,
     usesPowerslide: true,
   },
 ];

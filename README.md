@@ -448,6 +448,65 @@ drivable height soon enough to reach, it drives. Being able to fly is not a
 reason to, and without that check a bot goes up for nearly every loose ball and
 gives up more on the ground than it wins in the air.
 
+### Aerial defence
+
+The Champion also leaves the ground to cut out a shot heading into its own net.
+It is the last thing a bot learns, and the top tier only: going up in defence is
+the riskiest thing in the game, because a miss leaves the car behind the play,
+out of boost, with the ball in an empty net.
+
+**The trigger is the threat, not the mode.** This was the mistake worth writing
+down. A defensive aerial looks like it belongs in the `defend` mode, and putting
+it there does nothing at all: `defend` means the ball is *deeper* than the car,
+so the bot is chasing back and an aerial has no hope of catching up. A shot
+flying over a goalside defender's head — the one ball most worth going up for —
+reads as `attack`, because the bot is between the ball and its net and the ball
+is simply the thing to go and hit. `threatensGoal` in
+[`src/ai/ballPrediction.ts`](src/ai/ballPrediction.ts) decides it instead: if
+the predicted path crosses the defended line inside the mouth, the defensive
+search runs whatever the bot thought it was doing.
+
+**A keeper is where it shows.** A keeper sits in `defend` permanently, so the
+attacking search never ran for it: it stood on its line and watched lofted shots
+sail over. Over 120 shots lofted into its net, with the defender goalside and
+the ball passing some 630 units above its roof:
+
+| | Veteran keeper | Champion keeper |
+|---|---|---|
+| Conceded | 116 / 120 | **76 / 120** |
+| Air saves | 4 | **46** |
+
+The same shots against a bot with no aerials at all go in 120 times out of 120,
+which is the point: these are not saves being made better, they are saves that
+could not be attempted.
+
+Outside the keeper role the gain is small — a balanced defender already went up
+for these balls through the attacking search, and measures the same 19 saves
+either way — and for shots arriving low in the mouth it is 12 saves against 16.
+
+**The search differs from the attacking one in what it is asking.** The
+attacking search asks whether a chance is worth the boost; this one starts from
+the fact that the ball is going in unless something intervenes, so it asks only
+whether the save is possible: a height floor at 0.6 of the attacking one, a
+longer horizon to see the shot early, and a budget that will empty the tank.
+
+It takes the *earliest* interception that works, not the latest. The latest has
+the most climb time in it and is much worse — 3 saves against 19 — because the
+launch is planned *from* the interception, so a late interception is a late
+launch and the car is still rolling along the floor as the ball goes over it.
+
+A clearance is aimed up-field, high, and toward the wall the ball is already
+nearest, rather than at the opposing goal. A clear that has to reverse the
+ball's sideways motion as well as its approach asks far more of the touch, and
+what it gets wrong it leaves sitting in front of the net it just came from.
+
+**What is not measured.** None of this changes a bot-versus-bot match: with the
+flag on and off, a Champion attacker against a Champion keeper produces
+byte-identical results, because bots shoot low and flat and the threat test
+never fires. It is a change for playing against a human, who lofts. So the
+effect on The Lockout — a Champion keeper behind a narrow net — is real but
+unquantified here. The Wall is a Veteran keeper and is untouched.
+
 ## Layout
 
 ```
@@ -587,7 +646,9 @@ Honest list of what is not there, in rough order of how much it matters:
   a mostly ballistic path, and about a third of its attempts connect. It aims
   the touch now, but only roughly: the median leaves 37 degrees off the goal
   against 12 on the ground, so an aerial is a chance created rather than a shot
-  taken. It cannot defend one at all, and it will not double-touch or redirect.
+  taken. It will not double-touch or redirect, and aerial defence is the
+  Champion's alone — every tier below it is beaten by a lofted shot it can see
+  coming.
   Good enough that the top tiers feel like they play above the floor; a long way
   from good.
 - **The gamepad mapping has never been tried on a real pad.** It is tested

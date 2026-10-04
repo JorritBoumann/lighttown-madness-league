@@ -6,7 +6,12 @@ import { emptyInput } from '../input/types';
 import type { Car } from '../physics/car';
 import type { BoostPad } from '../physics/boostPads';
 import { FORWARD, UP, RIGHT, WORLD_UP } from '../core/axes';
-import { BallPredictor, type BallSnapshot, type PredictedSample } from './ballPrediction';
+import {
+  BallPredictor,
+  threatensGoal,
+  type BallSnapshot,
+  type PredictedSample,
+} from './ballPrediction';
 import { tier, type BotTier } from './tiers';
 import {
   pointNoseAt,
@@ -83,6 +88,14 @@ export class Bot {
    * moment the prediction wobbles and ends up jumping on the spot instead.
    */
   private aerial: {
+    /**
+     * Whether this is a shot at their net or a clearance away from ours.
+     *
+     * Only the aim point differs, but it differs completely: a save aimed at
+     * the opposing goal is a shot that has to be perfect, and a miss puts the
+     * ball back where it came from.
+     */
+    purpose: 'shot' | 'clear';
     /** Where to meet the ball, refreshed from the intercept time each frame. */
     target: THREE.Vector3;
     /**
@@ -214,8 +227,17 @@ export class Bot {
     }
 
     this.mode = this.chooseMode(ball, world);
-    if (this.mode === 'attack' && this.tier.usesAerials && this.car.grounded) {
-      const started = this.considerAerial(ball);
+    if (this.tier.usesAerials && this.car.grounded) {
+      // Two searches, asking different questions, and the threat decides which
+      // — not the mode. A shot flying over a goalside defender's head reads as
+      // 'attack' here, because the bot is between the ball and its own net and
+      // the ball is the thing to go and hit; that is exactly the ball most
+      // worth going up for, and gating defence on the 'defend' mode misses it
+      // entirely. The 'defend' mode means the ball is *deeper* than the car,
+      // which is the one geometry an aerial cannot help with.
+      const started =
+        (this.tier.defendsAerially && this.considerDefensiveAerial(ball)) ||
+        (this.mode === 'attack' && this.considerAerial(ball));
       if (started) {
         this.mode = 'aerial';
         return this.flyAerial(dt, ball);
@@ -627,6 +649,68 @@ export class Bot {
   // --- aerials ------------------------------------------------------------
 
   /**
+   * Whether an interception can actually be flown to, and whether it can be
+   * paid for.
+   *
+   * Shared by the attacking and defensive searches on purpose: this is the
+   * launch planning, and it is the part that was hard to get right. Two copies
+   * of it would drift, and a fix applied to one of them would silently leave
+   * the other wrong — which is a mistake this codebase has already made.
+   *
+   * `budget` is the multiple of the boost in the tank the attempt may cost: a
+   * save is worth emptying it, a chance is not.
+   */
+  private aerialReachable(sample: PredictedSample, budget: number): boolean {
+    const a = cfg.ai;
+    const p = this.car.position;
+    const gravity = -cfg.physics.gravity;
+    // What a jump and a double jump are worth, as one upward push.
+    const jumpSpeed = (cfg.car.jumpImpulse + cfg.car.doubleJumpImpulse) * this.mods().jump;
+    const boostAccel = cfg.boost.accel * this.mods().boostAccel;
+
+    const distance = Math.hypot(sample.position.x - p.x, sample.position.z - p.z);
+    const climb = sample.position.y - p.y;
+
+    // How long the climb takes, and therefore how far the car will drift
+    // across while doing it. That drift *is* the lateral reach of an aerial:
+    // a fixed radius around the ball is not a criterion, it is a guess, and
+    // the one here previously was tight enough to make a correct launch
+    // impossible.
+    const climbSeconds = climbTime({
+      height: climb,
+      launchSpeed: jumpSpeed,
+      boostAccel,
+      gravity,
+      turnTime: a.aerialTurnTime,
+    });
+    if (climbSeconds === null) return false;
+    // There has to be time to climb before the ball arrives.
+    if (sample.time < climbSeconds) return false;
+
+    // And the car has to be able to get to the launch point in the time left
+    // over, at a speed that then carries it across.
+    const launchSpeedNow = Math.max(this.car.speed, cfg.car.maxDriveSpeed * 0.5);
+    const drift = launchSpeedNow * climbSeconds;
+    const toLaunch = distance - drift;
+    const timeToLaunch = sample.time - climbSeconds;
+    if (toLaunch > launchSpeedNow * timeToLaunch + a.aerialMaxReach) return false;
+    if (distance > a.aerialMaxReach + drift) return false;
+
+    const cost = aerialCost({
+      distance,
+      climb,
+      time: sample.time,
+      speed: this.car.speed,
+      gravity,
+      boostAccel,
+      jumpSpeed,
+    });
+    if (cost === null) return false;
+    // Pay for it out of what is actually in the tank.
+    return cost * cfg.boost.drainPerSec <= this.car.boost * budget;
+  }
+
+  /**
    * Looks for a ball worth leaving the ground for, and commits if there is one.
    *
    * Deliberately strict: an aerial that fails leaves the bot airborne, out of
@@ -645,58 +729,72 @@ export class Bot {
     // take that instead.
     if (this.groundedChanceSoon(samples)) return false;
 
-    const p = this.car.position;
-    const gravity = -cfg.physics.gravity;
-    // What a jump and a double jump are worth, as one upward push.
-    const jumpSpeed = (cfg.car.jumpImpulse + cfg.car.doubleJumpImpulse) * this.mods().jump;
-    const boostAccel = cfg.boost.accel * this.mods().boostAccel;
-
     for (const sample of samples) {
       if (sample.time < a.aerialMinTime) continue;
       if (sample.position.y < a.aerialMinHeight) continue;
-
-      const distance = Math.hypot(sample.position.x - p.x, sample.position.z - p.z);
-      const climb = sample.position.y - p.y;
-
-      // How long the climb takes, and therefore how far the car will drift
-      // across while doing it. That drift *is* the lateral reach of an aerial:
-      // a fixed radius around the ball is not a criterion, it is a guess, and
-      // the one here previously was tight enough to make a correct launch
-      // impossible.
-      const climbSeconds = climbTime({
-        height: climb,
-        launchSpeed: jumpSpeed,
-        boostAccel,
-        gravity,
-        turnTime: a.aerialTurnTime,
-      });
-      if (climbSeconds === null) continue;
-      // There has to be time to climb before the ball arrives.
-      if (sample.time < climbSeconds) continue;
-
-      // And the car has to be able to get to the launch point in the time left
-      // over, at a speed that then carries it across.
-      const launchSpeedNow = Math.max(this.car.speed, cfg.car.maxDriveSpeed * 0.5);
-      const drift = launchSpeedNow * climbSeconds;
-      const toLaunch = distance - drift;
-      const timeToLaunch = sample.time - climbSeconds;
-      if (toLaunch > launchSpeedNow * timeToLaunch + a.aerialMaxReach) continue;
-      if (distance > a.aerialMaxReach + drift) continue;
-
-      const cost = aerialCost({
-        distance,
-        climb,
-        time: sample.time,
-        speed: this.car.speed,
-        gravity,
-        boostAccel,
-        jumpSpeed,
-      });
-      if (cost === null) continue;
-      // Pay for it out of what is actually in the tank.
-      if (cost * cfg.boost.drainPerSec > this.car.boost) continue;
+      if (!this.aerialReachable(sample, 1)) continue;
 
       this.aerial = {
+        purpose: 'shot',
+        target: new THREE.Vector3(sample.position.x, sample.position.y, sample.position.z),
+        timeToIntercept: sample.time,
+        elapsed: 0,
+        jumped: false,
+        doubleJumped: false,
+        heldFor: 0,
+        releasedFor: 0,
+      };
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Looks for a shot heading into its own net that can only be met in the air,
+   * and commits to cutting it out.
+   *
+   * The attacking search asks "is there a chance here worth the boost". This
+   * one asks a different question: the ball is going in unless something gets
+   * in its way, so the test is not whether the aerial is good but whether it is
+   * possible. Hence the looser height floor, the longer horizon and the bigger
+   * budget — and hence the top tier only, because a miss leaves the net empty.
+   */
+  private considerDefensiveAerial(ball: BallSnapshot): boolean {
+    const a = cfg.ai;
+    // Still needs enough to climb on. Nothing is saved by launching dry.
+    if (this.car.boost < a.aerialMinBoost) return false;
+
+    const samples = this.predictor.predict(ball, a.aerialSaveHorizon);
+    const threat = threatensGoal({
+      samples,
+      goalX: this.ownGoalX,
+      halfWidth: cfg.arena.goalWidth / 2 + cfg.ball.radius,
+      maxHeight: cfg.arena.goalHeight + cfg.ball.radius,
+    });
+    if (!threat) return false;
+
+    // Driving still beats flying. A shot along the floor is a ground save.
+    if (this.groundedChanceSoon(samples)) return false;
+
+    const side = Math.sign(this.ownGoalX) || 1;
+    const floor = a.aerialMinHeight * a.aerialSaveHeight;
+
+    // Earliest viable interception, not the latest. Taking the last moment that
+    // still works is tempting — it has the most climb time in it — and it is
+    // much worse, because the launch is planned *from* the interception: a late
+    // interception is a late launch, and the car is still rolling along the
+    // floor as the ball goes over its head. Measured: 3 saves against 19.
+    const deadline = threat.time - a.aerialSaveMargin;
+    for (const sample of samples) {
+      if (sample.time > deadline) break;
+      if (sample.time < a.aerialSaveMinTime) continue;
+      if (sample.position.y < floor) continue;
+      // And it has to be met in front of the line, not behind it.
+      if (sample.position.x * side >= Math.abs(this.ownGoalX)) break;
+      if (!this.aerialReachable(sample, a.aerialSaveBudget)) continue;
+
+      this.aerial = {
+        purpose: 'clear',
         target: new THREE.Vector3(sample.position.x, sample.position.y, sample.position.z),
         timeToIntercept: sample.time,
         elapsed: 0,
@@ -772,6 +870,19 @@ export class Bot {
    */
   private aerialContactPoint(ballAt: THREE.Vector3): void {
     const a = cfg.ai;
+    if (this.aerial?.purpose === 'clear') {
+      // Up-field, high, and toward the wall the ball is already nearest. The
+      // sideways bias is the point: a clear that has to reverse the ball's
+      // lateral motion as well as its approach asks far more of the touch, and
+      // what it gets wrong it leaves in front of the net.
+      this.netSpot.set(
+        this.targetGoalX,
+        cfg.arena.ceiling * a.aerialClearHeight,
+        Math.sign(ballAt.z || 1) * cfg.arena.halfWidth * a.aerialClearWide,
+      );
+    } else {
+      this.netSpot.set(this.targetGoalX, cfg.arena.goalHeight * a.aerialGoalHeight, 0);
+    }
     // A shot left steeply downward is left alone. Clamping it flatter so the
     // contact point sits behind the ball rather than above it sounds like it
     // should help a climbing car and measures as nothing at all, while
@@ -779,7 +890,7 @@ export class Bot {
     aerialContact({
       ballAt,
       ballVelocity: this.lastBallVelocity,
-      goal: this.netSpot.set(this.targetGoalX, cfg.arena.goalHeight * a.aerialGoalHeight, 0),
+      goal: this.netSpot,
       shotSpeed: a.shotSpeed,
       offset: cfg.ball.radius * a.aerialContactRadii,
       out: this.meet,
