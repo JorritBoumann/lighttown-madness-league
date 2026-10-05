@@ -175,12 +175,20 @@ What was actually wrong with the first version, in order of how much it mattered
   stadium. There is now a raked bowl of fourteen tiers starting at the top of
   the wall, a crowd, and floodlights at the corners. The crowd is a single
   instanced mesh, so several thousand spectators cost one draw call.
-- **No pitch.** Markings were drawn as lines, and a line cannot carry mowing
-  stripes, a tinted end, or enough thickness to read at speed — at a distance a
+- **No pitch.** Markings were drawn as lines, and a line cannot carry surface
+  banding, a tinted end, or enough thickness to read at speed — at a distance a
   one-pixel line either shimmers or vanishes. The pitch is now a painted
-  texture: stripes, halfway line, centre circles, goal areas, keeper arcs,
-  corner arcs, and a tinted area at each end so which way you are attacking is
-  readable without looking at the scoreboard.
+  texture: bands across the short axis, halfway line, centre circles, goal
+  areas, keeper arcs, corner arcs, and a tinted area at each end so which way
+  you are attacking is readable without looking at the scoreboard.
+
+  The floor is a cool synthetic surface rather than grass, so the bands are
+  panels rather than mowing stripes — but they stay either way, because
+  alternating bands passing under the car are a large part of how fast the game
+  feels. One consequence worth knowing: the attacking end is tinted **cyan**,
+  not the team's own blue. A blue tint on a blue floor is almost no tint at all.
+  Measured as distance from the centre of the pitch in RGB, the orange end sat
+  at 61 and blue at 26 until it was shifted to cyan, which brings it to 49.
 - **Flat lighting.** There was no tone mapping, so the bright end crushed to
   white and everything else read as the same navy. ACES filmic tone mapping now,
   a night sky gradient used as the environment map — metal with nothing to

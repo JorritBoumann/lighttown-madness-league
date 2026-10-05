@@ -63,7 +63,7 @@ export function skyTexture(): THREE.Texture {
   return tex;
 }
 
-/** The pitch: mowing stripes, markings, and a tinted area at each end. */
+/** The pitch: banded surface, markings, and a tinted area at each end. */
 export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Texture {
   const W = 2560;
   const H = 2048;
@@ -78,10 +78,13 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   const pz = (z: number) => (z + hw) * sz;
   const len = (uu: number) => uu * sx;
 
-  // Mowing stripes, across the short axis the way a roller would run.
+  // Banding across the short axis. Not mowing stripes: this is a cool synthetic
+  // surface rather than grass, so the bands read as panels laid across the
+  // pitch. They stay either way, because alternating bands passing under the
+  // car are a large part of how fast the game feels.
   const stripes = 16;
   for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? '#24542d' : '#1d4826';
+    ctx.fillStyle = i % 2 ? '#2b3b5c' : '#253454';
     ctx.fillRect((i / stripes) * W, 0, W / stripes + 1, H);
   }
 
@@ -100,7 +103,10 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   const mouth = goalWidth / 2;
   for (const [sign, tint] of [
     [1, 'rgba(255,112,67,0.26)'],
-    [-1, 'rgba(66,165,245,0.26)'],
+    // Cyan rather than the team's own blue. On a cool floor a blue tint over
+    // blue is almost no tint at all, and the end you are attacking has to be
+    // readable at a glance: the orange end got that for free, this one did not.
+    [-1, 'rgba(120,226,255,0.46)'],
   ] as [number, string][]) {
     const depth = len(1700);
     ctx.fillStyle = tint;

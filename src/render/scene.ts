@@ -51,7 +51,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   // Only one of them casts a shadow. Four shadow maps is four extra passes
   // over the scene for a second and third shadow nobody reads at this camera
   // distance, and the one that does cast is the brightest.
-  const hemi = new THREE.HemisphereLight(0x3d5578, 0x121a14, 0.5);
+  const hemi = new THREE.HemisphereLight(0x3d5578, 0x111726, 0.5);
   scene.add(hemi);
 
   const corners: [number, number, number][] = [
@@ -68,8 +68,9 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     if (!sun) sun = lamp;
   }
 
-  // A warm bounce off the pitch, so the undersides of cars are not black.
-  const bounce = new THREE.DirectionalLight(0x6f8f72, 0.22);
+  // A bounce off the pitch, so the undersides of cars are not black. Tinted to
+  // the floor it is bouncing off, which is now cool rather than grass green.
+  const bounce = new THREE.DirectionalLight(0x6d82a8, 0.22);
   bounce.position.set(0, -1000, 0);
   scene.add(bounce);
 
@@ -139,9 +140,9 @@ export function buildArenaMesh(): THREE.Group {
   // surface laid just above it, so the pitch can be repainted when a modifier
   // changes the goals without touching the collider geometry's mesh.
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x16351d,
-    roughness: 0.95,
-    metalness: 0.0,
+    color: 0x1b2742,
+    roughness: 0.9,
+    metalness: 0.05,
   });
   const wallTex = wallTexture();
   wallTex.repeat.set(4, 1);
@@ -234,7 +235,7 @@ export function buildArenaMesh(): THREE.Group {
 /**
  * The painted pitch, as one textured plane just above the floor panel.
  *
- * It was drawn as lines before. Lines cannot carry mowing stripes, a tinted
+ * It was drawn as lines before. Lines cannot carry surface banding, a tinted
  * end, or markings thick enough to read at speed, and at a distance a one-pixel
  * line either shimmers or disappears. A texture also means the goal areas are
  * repainted to match when a modifier narrows the nets.
