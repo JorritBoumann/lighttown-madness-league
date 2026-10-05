@@ -825,6 +825,34 @@ describe('walls and the ceiling', () => {
     return held;
   }
 
+  it('slides down a wall when it stops driving', () => {
+    // A wall is something you hold with speed, not somewhere you can park.
+    // Applying the floor's grip to a vertical surface made walls velcro: a car
+    // left on one slid 174 units in three seconds, where gravity alone should
+    // have taken it nearly three thousand. It simply hung there.
+    phys = new PhysicsWorld();
+    createArena(phys);
+    ball = new Ball(phys);
+    const half = Math.PI / 4;
+    const startY = 1200;
+    car = new Car(phys, { x: 0, y: startY, z: 4040 }, 0, 0);
+    // On the +z wall: roof pointing into the pitch, nose up.
+    car.body.setRotation({ x: Math.sin(-half), y: 0, z: 0, w: Math.cos(-half) }, true);
+
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(3 / dt); i++) {
+      car.input = emptyInput();
+      car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+    const dropped = startY - car.position.y;
+    expect(dropped).toBeGreaterThan(600);
+    // Still against the wall on the way down, rather than falling off it.
+    expect(car.position.z).toBeGreaterThan(3900);
+  });
+
   it('falls off the ceiling when it runs out of speed', () => {
     // The ceiling is not flypaper. Cancelling the part of gravity that peels
     // the car off outright let it sit up there at a standstill, which reads as

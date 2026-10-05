@@ -112,6 +112,15 @@ export const config = {
      */
     ceilingHoldSpeed: 900,
     /**
+     * How much grip a surface loses as it tilts away from the floor, 0 to 1.
+     *
+     * At 0 a wall grips exactly like the pitch, which is what made walls feel
+     * like velcro: a car could sit on a vertical one almost stationary. At 1 a
+     * wall offers nothing to resist sliding along it. The stick force holding
+     * the car *on* the surface is separate and unaffected.
+     */
+    wallSlip: 0.85,
+    /**
      * How fast the car has to be heading into a surface before its velocity is
      * turned onto it rather than absorbed by the contact. Above the suspension
      * settling into the floor, well below anything a seam produces.

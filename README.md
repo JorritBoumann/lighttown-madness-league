@@ -200,6 +200,20 @@ ceiling and drives there, an unboosted 2000 gets most of the way over, and
 trundling at the wall at 600 puts you part way up and no further, which is what
 stops every loose ball turning into a wall drive.
 
+**Surfaces that are not the floor hold you less.** Applying the pitch's grip to
+a vertical wall made walls velcro: measured, a car parked on one with no
+throttle slid 174 units in three seconds, where gravity alone should have taken
+it nearly three thousand. It hung there, and hanging there is what reads as
+unnatural — a wall is something you hold with speed, not somewhere you can stop.
+Lateral grip and coasting now fade as the surface tilts, so the same car slides
+959 units and accelerating. The stick force holding the car *on* the wall is
+separate and untouched; this is only about what resists sliding along it.
+
+The same applies overhead, where the car has to earn the ceiling with speed: at
+`ceilingHoldSpeed` it holds, below that gravity takes its share back in
+proportion, and at a standstill it drops. Cancelling that outright made the
+ceiling flypaper — you could park on it.
+
 ## Match rules
 
 Set in the `match` block of [`src/config.ts`](src/config.ts): 90 seconds, first

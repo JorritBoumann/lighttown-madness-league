@@ -487,6 +487,22 @@ export class Car {
       }
     }
 
+    // How much grip the tyres keep on a surface that is not the floor.
+    //
+    // On the floor a car holds its line, and the friction that does that is
+    // what makes driving feel like driving. Applying the same friction on a
+    // wall makes it velcro: measured, a car parked on a vertical wall with no
+    // throttle slid 174 units in three seconds, where gravity alone should
+    // have taken it nearly three thousand. It hung there, which is what reads
+    // as unnatural — a wall should be something you hold with speed, not
+    // somewhere you can stop.
+    //
+    // So grip and coasting fade as the surface tilts away from the floor. The
+    // stick force keeping the car *on* the wall is untouched; this is only
+    // about what resists sliding *along* it.
+    const steepness = Math.min(1, Math.max(0, 1 - n.y));
+    const slip = 1 - steepness * c.wallSlip;
+
     // Work in the surface plane, so this all holds on walls and the ceiling.
     const planeFwd = this.tmp.copy(this.fwd).addScaledVector(n, -this.fwd.dot(n)).normalize();
     const planeRight = this.tmp2.copy(this.right).addScaledVector(n, -this.right.dot(n)).normalize();
@@ -512,7 +528,7 @@ export class Car {
         }
       }
     } else if (absAlong > 1) {
-      const drop = Math.min(absAlong, c.coastDecel * dt);
+      const drop = Math.min(absAlong, c.coastDecel * dt * slip);
       this.vel.addScaledVector(planeFwd, -sign(alongSpeed) * drop);
     }
 
@@ -520,7 +536,7 @@ export class Car {
     // A fraction of sideways speed shed per step. Powerslide cuts it right down,
     // which is the whole trick: the car keeps its heading while it slides.
     const lateral = this.vel.dot(planeRight);
-    const grip = (inp.drift ? c.handbrakeGrip : c.lateralGrip) * m.grip;
+    const grip = (inp.drift ? c.handbrakeGrip : c.lateralGrip) * m.grip * slip;
     this.vel.addScaledVector(planeRight, -lateral * Math.min(1, grip * 120 * dt));
 
     // Press into the surface so the car holds walls and the seam ramps.
