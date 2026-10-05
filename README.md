@@ -1088,3 +1088,18 @@ Honest list of what is not there, in rough order of how much it matters:
   having because "nothing is moving" has several possible causes.
 - `bot.reasoning` shows why a bot chose its current target — alignment, whether
   it is behind the ball, whether it has committed to a shot.
+
+## Running a server
+
+The simulation runs headlessly, so it can be the authority for a networked
+match rather than something each browser guesses at.
+
+```bash
+npm run server          # ws://localhost:8080, 2 seats, 1 bot
+PORT=9000 SEATS=4 BOTS=0 npm run server
+```
+
+Clients send `CarInput` and nothing else — there is no message carrying a
+position, so a client cannot assert one. The server replies with snapshots at
+30Hz while simulating at 120Hz, each carrying the last input sequence it
+consumed from that client, which is the hook client-side prediction hangs on.

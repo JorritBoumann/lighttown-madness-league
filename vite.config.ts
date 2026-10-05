@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
 
-export default defineConfig({
+export default defineConfig(({ isSsrBuild }) => ({
   // Rapier's ordinary build imports its WebAssembly as a module, which this
   // turns into something a browser can load. Instantiating it is asynchronous,
   // so the bundle carries a top-level await; that needs no plugin here because
@@ -40,9 +40,10 @@ export default defineConfig({
        * The package also declares `module` but neither `main` nor `exports`,
        * which is why the browser side points at the entry file directly.
        */
-      '@dimforge/rapier3d': process.env.VITEST
-        ? '@dimforge/rapier3d-compat'
-        : '@dimforge/rapier3d/rapier.js',
+      '@dimforge/rapier3d':
+        process.env.VITEST || isSsrBuild
+          ? '@dimforge/rapier3d-compat'
+          : '@dimforge/rapier3d/rapier.js',
     },
   },
   server: { port: 5173, host: '127.0.0.1' },
@@ -65,4 +66,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

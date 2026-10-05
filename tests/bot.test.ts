@@ -686,7 +686,11 @@ describe('aerials', () => {
     expect(errs.length).toBeGreaterThanOrEqual(10);
     const sorted = [...errs].sort((a, b) => a - b);
     expect(sorted[Math.floor(sorted.length / 2)]).toBeLessThan(50);
-  });
+    // Eighty seeds of seven seconds at 120Hz is about sixty-seven thousand
+    // physics steps, which lands near enough to vitest's five-second default to
+    // time out on a busy machine roughly half the time. It was the timeout
+    // flaking, not the measurement: the median it checks is deterministic.
+  }, 30_000);
 
   it('stays on the ground at the tiers that do not fly', () => {
     for (let seed = 1; seed <= 8; seed++) {
