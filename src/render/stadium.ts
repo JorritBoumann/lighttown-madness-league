@@ -189,6 +189,21 @@ export function buildStadium(layout: ArenaLayout): Stadium {
     inset: lower.inset + lower.rows * lower.tread + s.upperStep,
   };
 
+  /**
+   * How far back this run of seating has to start.
+   *
+   * Behind each goal the arena does not stop at the end wall: the goal box
+   * sticks out nearly a thousand units past it. The bowl was inset the same
+   * 130 units everywhere, so the first rows behind each net were standing
+   * *inside* the goal box — which is exactly what the row of spectators
+   * hovering inside the net turned out to be. They were not showing through a
+   * gap; they were in there.
+   */
+  const insetFor = (edge: Edge): number => {
+    const facesEnd = Math.abs(edge.normal.x) > 0.9;
+    return lower.inset + (facesEnd ? cfg.arena.goalDepth + 160 : 0);
+  };
+
   for (const deck of [lower, upper]) {
     for (let row = 0; row < deck.rows; row++) {
       const outward = deck.inset + row * deck.tread;
@@ -197,15 +212,17 @@ export function buildStadium(layout: ArenaLayout): Stadium {
       // sky through between the rows and read as scaffolding.
       const height = y - deck.base + deck.rise;
       for (const edge of edges) {
+        const out = outward + (insetFor(edge) - lower.inset);
         slabs.push(
-          edgeSlab(edge, outward + deck.tread / 2, deck.tread, height, deck.base + height / 2 - deck.rise, 240),
+          edgeSlab(edge, out + deck.tread / 2, deck.tread, height, deck.base + height / 2 - deck.rise, 240),
         );
       }
 
       // Spectators along the row, with gangways cut through at intervals.
       for (const edge of edges) {
+        const out = outward + (insetFor(edge) - lower.inset);
         const step = s.seatSpacing;
-        const count = Math.max(1, Math.floor((edge.length + outward * 0.6) / step));
+        const count = Math.max(1, Math.floor((edge.length + out * 0.6) / step));
         for (let i = 0; i <= count; i++) {
           const t = i / count - 0.5;
           // Gangways. A continuous band of people looks like a texture; the
@@ -224,8 +241,8 @@ export function buildStadium(layout: ArenaLayout): Stadium {
           // Nudged along the row and in depth. Evenly spaced boxes of one size
           // read as brickwork rather than as people; the gaps and the mismatch
           // are what make a crowd out of them.
-          const along = t * (edge.length + outward * 0.6) + jitterA * s.seatSpacing * 0.5;
-          const depth = outward + deck.tread * (0.52 + Math.abs(jitterB) * 0.22);
+          const along = t * (edge.length + out * 0.6) + jitterA * s.seatSpacing * 0.5;
+          const depth = out + deck.tread * (0.52 + Math.abs(jitterB) * 0.22);
           pos.set(
             edge.mid.x + edge.dir.x * along + edge.normal.x * depth,
             y + s.seatHeight * 0.5 + jitterB * 12,
@@ -268,7 +285,8 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   // rotated to each edge, and at the forty-five degree diagonals anything less
   // leaves a wedge open.
   const facadeParts: THREE.BufferGeometry[] = [];
-  const facadeOut = upper.inset + upper.rows * upper.tread + 120;
+  const facadeOut =
+    upper.inset + upper.rows * upper.tread + cfg.arena.goalDepth + 160 + 120;
   const facadeTop = upper.base + upper.rows * upper.rise + s.roofClearance + 220;
   const ring = offsetFootprint(edges, facadeOut);
   for (let i = 0; i < ring.length; i++) {

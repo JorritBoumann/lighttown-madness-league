@@ -94,11 +94,15 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   // from it. Those are playable surfaces, so driving up one meant driving up
   // something that rendered black. A real arena is lit from every side of the
   // bowl; one sun is a thing that happens outdoors.
+  // Raised well above the rim rather than level with it. Aimed flat they skim
+  // the pitch, and a grazing light on a surface with any sheen at all throws a
+  // specular streak the length of the field straight back at a low camera —
+  // which looked like the car was dragging a searchlight behind it.
   for (const at of [
-    [0, 1500, -9000],
-    [-9000, 1500, 0],
-    [0, 1500, 9000],
-    [9000, 1500, 0],
+    [0, 5200, -9000],
+    [-9000, 5200, 0],
+    [0, 5200, 9000],
+    [9000, 5200, 0],
   ] as [number, number, number][]) {
     const wash = new THREE.DirectionalLight(0xdfe7f5, cfg.render.wallFillIntensity);
     wash.position.set(at[0], at[1], at[2]);
@@ -338,8 +342,14 @@ export function buildArenaMesh(): THREE.Group {
   goalHex.repeat.set(3, 2);
   const goalBoxMat = new THREE.MeshStandardMaterial({
     map: goalHex,
-    color: 0x1a2130,
-    roughness: 0.85,
+    // Pale rather than near-black. A dark box lit by a saturated team-coloured
+    // lamp came out as a flat red-brown cave with the lamp as a dot in it:
+    // nothing to see, and the lattice invisible. A light interior takes the
+    // lamp's colour as a wash and gives the netting something to read against.
+    color: 0x9aa7b8,
+    emissive: 0x2c3444,
+    emissiveIntensity: 1,
+    roughness: 0.78,
     envMapIntensity: 0.1,
     side: THREE.DoubleSide,
   });
@@ -529,9 +539,17 @@ export function splitWallPanel(
   const top = panel.pos.y + panel.half.y;
   if (top - bottom <= solidTop * 1.5) return [];
 
+  // The solid band is the first `solidTop` units of the panel's *own* height.
+  //
+  // For the side and end walls, which stand on the pitch, that is the floor to
+  // the top of the boards as before. For the lintel over each goal mouth it is
+  // a solid header sitting directly on the crossbar — which is what a real goal
+  // has, and what this needed: as all-glass, you looked straight through it at
+  // the stands just above the goal's roof, and a band of spectators appeared to
+  // be standing inside the net.
   const bands: { height: number; centre: number; kind: 'solid' | 'glass' }[] = [];
-  const solidLow = Math.max(bottom, 0);
-  const solidHigh = Math.min(top, solidTop);
+  const solidLow = bottom;
+  const solidHigh = Math.min(top, bottom + solidTop);
   if (solidHigh - solidLow > 1) {
     bands.push({
       height: solidHigh - solidLow,
@@ -539,7 +557,7 @@ export function splitWallPanel(
       kind: 'solid',
     });
   }
-  const glassLow = Math.max(bottom, solidTop);
+  const glassLow = solidHigh;
   if (top - glassLow > 1) {
     bands.push({ height: top - glassLow, centre: (glassLow + top) / 2, kind: 'glass' });
   }
@@ -575,10 +593,11 @@ function buildPitch(layout: ArenaLayout): THREE.Mesh {
         return blades;
       })(),
       normalScale: new THREE.Vector2(0.5, 0.5),
-      // Nearly matte. Grass is not shiny, and the sheen that used to be here
-      // spread a broad specular wash across the whole pitch the moment the key
-      // light got strong — which is what made it look milky rather than green.
-      roughness: 0.88,
+      // Nearly matte, and then matte. Grass is not shiny, and the sheen that
+      // used to be here spread a broad specular wash across the whole pitch the
+      // moment the key light got strong — which is what made it look milky
+      // rather than green. Even 0.88 was enough to streak under a low light.
+      roughness: 0.97,
       metalness: 0,
       envMapIntensity: cfg.render.pitchEnvIntensity,
     }),
@@ -663,14 +682,20 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
     roughness: 0.3,
     metalness: 0.4,
   });
-  const r = 26;
+  // Thicker and rounded, with a sphere at each corner so the frame reads as one
+  // continuous tube rather than three sticks meeting at right angles.
+  const r = 44;
   for (const zs of [1, -1]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(r, r, goal.height, 12), frameMat);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(r, r, goal.height, 20), frameMat);
     post.position.set(goal.x, goal.height / 2, zs * hw);
     post.castShadow = true;
     group.add(post);
+
+    const corner = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 12), frameMat);
+    corner.position.set(goal.x, goal.height, zs * hw);
+    group.add(corner);
   }
-  const bar = new THREE.Mesh(new THREE.CylinderGeometry(r, r, goal.width, 12), frameMat);
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(r, r, goal.width, 20), frameMat);
   bar.rotation.x = Math.PI / 2;
   bar.position.set(goal.x, goal.height, 0);
   bar.castShadow = true;
@@ -764,9 +789,53 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
   // is about fourteen thousand — so the 3.2 this started at delivered an
   // irradiance of 0.0002 and the box stayed black. Derived from the depth so it
   // stays right if a round modifier changes the goal.
-  const lamp = new THREE.PointLight(colour, Math.pow(depth, 1.6) * 2.4, depth * 3.4, 1.6);
+  const lamp = new THREE.PointLight(0xfff0e4, Math.pow(depth, 1.6) * 2.0, depth * 3.4, 1.6);
   lamp.position.set(goal.x - inward * depth * 0.55, goal.height * 0.55, 0);
   group.add(lamp);
+
+  // A lit panel across the back of the box, which is the thing you are aiming
+  // at and the thing that tells you whose net it is from the far end.
+  const backGlow = new THREE.Mesh(
+    new THREE.PlaneGeometry(goal.width * 0.88, goal.height * 0.5),
+    new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.5 }),
+  );
+  backGlow.position.set(goal.x - inward * (depth - 14), goal.height * 0.42, 0);
+  backGlow.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
+  group.add(backGlow);
+
+  // Wing panels inside the mouth, angled in from each post.
+  //
+  // The reference arenas all have these and they do a lot of work: they give
+  // the opening a depth you can read at a glance instead of a flat hole, and
+  // they catch the lamp so the inside of the goal is not one even wash.
+  const wingMat = new THREE.MeshStandardMaterial({
+    // Panelling, not a light. With the lamp right next to them a pale emissive
+    // surface clips to white and the two wings became the brightest things in
+    // the arena — blank billboards hanging in the net.
+    color: 0x7e8b9c,
+    emissive: 0x1b2232,
+    emissiveIntensity: 1,
+    roughness: 0.55,
+    metalness: 0.3,
+    side: THREE.DoubleSide,
+  });
+  for (const zs of [1, -1]) {
+    // Sized against the mouth, not against the box. The first pass used the
+    // goal's depth for the width and its full height, and two slabs that size
+    // standing just inside the posts read as blank white billboards filling the
+    // net rather than as panelling on the inside of the frame.
+    const wing = new THREE.Mesh(
+      new THREE.BoxGeometry(depth * 0.3, goal.height * 0.4, 14),
+      wingMat,
+    );
+    wing.position.set(
+      goal.x - inward * depth * 0.2,
+      goal.height * 0.34,
+      zs * (hw - 60),
+    );
+    wing.rotation.y = zs * goal.sign * 0.3;
+    group.add(wing);
+  }
 
   // And a lit floor strip across the line, which is what tells you the ball
   // actually crossed rather than rattled the frame.

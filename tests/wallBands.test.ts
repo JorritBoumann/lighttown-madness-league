@@ -30,7 +30,7 @@ describe('splitting a wall into hoardings and glass', () => {
     expect(bands[1]!.centre - bands[1]!.height / 2).toBeCloseTo(solidTop);
   });
 
-  it('gives a panel that starts above the hoardings no solid band at all', () => {
+  it('gives the lintel over a goal a solid header on the crossbar', () => {
     const lintel = {
       pos: { x: 5160, y: 1343, z: 0 },
       half: { x: 20, y: 701, z: 893 },
@@ -38,10 +38,19 @@ describe('splitting a wall into hoardings and glass', () => {
       kind: 'wall' as const,
     };
     const bands = splitWallPanel(lintel, solidTop);
-    expect(bands.every((b) => b.kind === 'glass')).toBe(true);
-    // And it stays where the layout put it, rather than dropping to the floor.
+    // Solid for its own first `solidTop` units, then glass — the same rule as
+    // any wall, applied from the panel's base rather than from the pitch.
+    //
+    // All-glass was wrong for a different reason than all-solid: you looked
+    // straight through it at the stands sitting just above the goal's roof, and
+    // a row of spectators appeared to be standing inside the net.
+    expect(bands[0]).toMatchObject({ kind: 'solid' });
+    expect(bands[0]!.centre - bands[0]!.height / 2).toBeCloseTo(642, 0);
+    expect(bands[0]!.height).toBeCloseTo(solidTop, 0);
+    expect(bands[1]!.kind).toBe('glass');
+    // Nothing drops to the floor.
     for (const band of bands) {
-      expect(band.centre - band.height / 2).toBeGreaterThanOrEqual(642);
+      expect(band.centre - band.height / 2).toBeGreaterThan(600);
     }
   });
 
@@ -54,7 +63,10 @@ describe('splitting a wall into hoardings and glass', () => {
           if (band.kind !== 'solid') continue;
           const low = band.centre - band.height / 2;
           const high = band.centre + band.height / 2;
-          const inMouthHeight = low < goal.height && high > 0;
+          // A band resting exactly on the crossbar is not inside the mouth;
+          // the tolerance is there because that boundary lands on 642.775 and
+          // the arithmetic puts it a tenth of a picometre below.
+          const inMouthHeight = low < goal.height - 1 && high > 0;
           const inMouthWidth =
             Math.abs(panel.pos.z) - panel.half.z < goal.width / 2 - 1;
           const atThisGoal = Math.abs(panel.pos.x - goal.x) < cfg.arena.goalDepth * 2;

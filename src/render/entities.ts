@@ -80,10 +80,11 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
   const accent = new THREE.MeshStandardMaterial({
     color: base,
     emissive: base,
-    // Low. With the arena's bloom at 0.62 an emissive of 0.9 blew the stripe
-    // and the light bar out to white, so the team colour they exist to carry
-    // was the one thing you could not read off them.
-    emissiveIntensity: 0.3,
+    // Low, and then lower again. With the arena's bloom at 0.62 an emissive of
+    // 0.9 blew the stripe and the light bar out to white, so the team colour
+    // they exist to carry was the one thing you could not read off them; 0.3
+    // still smeared a white streak down the whole flank at close range.
+    emissiveIntensity: 0.11,
     roughness: 0.3,
   });
 
@@ -226,7 +227,10 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
   const headMat = new THREE.MeshStandardMaterial({
     color: 0xfff6e0,
     emissive: 0xfff0cc,
-    emissiveIntensity: 0.55,
+    // The headlights are the brightest thing on the car and the car is the
+    // nearest thing to the camera, so they bloom harder than anything in the
+    // arena. At 0.55 the whole front of the car went to a white blob.
+    emissiveIntensity: 0.2,
   });
   for (const zs of [1, -1]) {
     const lamp = new THREE.Mesh(
@@ -247,7 +251,7 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
   const tailMat = new THREE.MeshStandardMaterial({
     color: 0xff5a3c,
     emissive: 0xff3a18,
-    emissiveIntensity: 0.7,
+    emissiveIntensity: 0.3,
   });
   for (const zs of [1, -1]) {
     const lamp = new THREE.Mesh(

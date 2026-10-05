@@ -744,7 +744,7 @@ export const config = {
      * the four walls and the whole ceiling measured at zero direct light —
      * climbing one meant climbing a surface that rendered black.
      */
-    wallFillIntensity: 0.55,
+    wallFillIntensity: 0.42,
     sunIntensity: 3.1,
     fillIntensity: 0.3,
 
@@ -759,7 +759,10 @@ export const config = {
      */
     bloomStrength: 0.62,
     bloomRadius: 0.72,
-    bloomThreshold: 0.76,
+    // Raised, so only things that are genuinely light sources bloom. At 0.76
+    // the car's own lamps and trim were over the line, and since the car is the
+    // nearest object to the camera they bloomed harder than the arena did.
+    bloomThreshold: 0.84,
   },
 
   camera: {

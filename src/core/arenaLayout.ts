@@ -125,9 +125,16 @@ export function buildArenaLayout(): ArenaLayout {
       yaw: 0,
       kind: 'goal',
     });
+    // The roof runs back over the back wall and out over the side walls, not
+    // just to the inside face of each.
+    //
+    // It used to stop at x = hl + gd while the back wall began there and only
+    // reached up to gh, which left an eighty-unit slot across the full width of
+    // the goal, open to the sky. From inside the net you could see a band of
+    // spectators floating above the back wall.
     panels.push({
-      pos: { x: e * (hl + gd / 2), y: gh + THICK, z: 0 },
-      half: { x: gd / 2, y: THICK, z: gw / 2 + THICK },
+      pos: { x: e * (hl + gd / 2 + THICK), y: gh + THICK, z: 0 },
+      half: { x: gd / 2 + THICK, y: THICK, z: gw / 2 + 2 * THICK },
       yaw: 0,
       kind: 'goal',
     });
