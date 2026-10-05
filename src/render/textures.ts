@@ -131,6 +131,22 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
     ctx.fillRect(0, (i / cross) * H, W, H / cross + 1);
   }
 
+  // Arcs swept across the bands, centred on the middle.
+  //
+  // A roller run in straight lines gives stripes; run round the centre it
+  // leaves arcs, and the two together are what stops a pitch reading as a
+  // striped rug. Low contrast on purpose — this is the pattern you notice
+  // after the markings, not before them.
+  ctx.save();
+  ctx.lineWidth = len(260);
+  for (let i = 0; i < 26; i++) {
+    ctx.strokeStyle = i % 2 ? 'rgba(255,255,255,0.028)' : 'rgba(0,0,0,0.034)';
+    ctx.beginPath();
+    ctx.arc(px(0), pz(0), len(420 + i * 430), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
   // Wear and colour drift, so no two parts of the pitch are the same green.
   for (let i = 0; i < 900; i++) {
     const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
@@ -161,19 +177,39 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // Team areas in front of each net, tinted rather than painted solid: this is
   // the cue that tells you which way you are attacking at a glance.
   const mouth = goalWidth / 2;
-  for (const [sign, tint] of [
-    // Faint. At thirty percent of a saturated blue these stopped reading as a
-    // tint and became paint: the kickoff spot sits inside the blue ellipse, so
-    // the grass under the car came out teal and the whole pitch looked
-    // mis-lit. The cue only has to be strong enough to read at a glance.
-    [1, 'rgba(255,138,96,0.12)'],
-    [-1, 'rgba(96,160,235,0.12)'],
-  ] as [number, string][]) {
-    const depth = len(1700);
-    ctx.fillStyle = tint;
+  for (const [sign, fill, edge] of [
+    // Each end's zone as a painted arc with a defined edge, rather than a soft
+    // ellipse fading out into the grass. The fill stays faint — at thirty
+    // percent of a saturated blue this stopped reading as a tint and became
+    // paint, and since the kickoff spot sits inside the blue one the grass
+    // under the car came out teal — but the edge is what actually tells you
+    // which end you are at.
+    [1, 'rgba(255,138,96,0.13)', 'rgba(255,150,105,0.5)'],
+    [-1, 'rgba(96,160,235,0.13)', 'rgba(110,175,245,0.5)'],
+  ] as [number, string, string][]) {
+    const radius = len(2300);
+    const from = sign > 0 ? Math.PI * 0.5 : Math.PI * 1.5;
+    const to = sign > 0 ? Math.PI * 1.5 : Math.PI * 2.5;
+    ctx.fillStyle = fill;
     ctx.beginPath();
-    ctx.ellipse(px(sign * hl), pz(0), depth, (mouth / (hw * 2)) * H * 2.1, 0, 0, Math.PI * 2);
+    ctx.moveTo(px(sign * hl), pz(-hw));
+    ctx.arc(px(sign * hl), pz(0), radius, from, to);
+    ctx.closePath();
     ctx.fill();
+
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = len(30);
+    ctx.beginPath();
+    ctx.arc(px(sign * hl), pz(0), radius, from, to);
+    ctx.stroke();
+
+    // A dashed arc inside it, the way the reference pitches break the zone up.
+    ctx.setLineDash([len(130), len(110)]);
+    ctx.lineWidth = len(18);
+    ctx.beginPath();
+    ctx.arc(px(sign * hl), pz(0), len(1500), from, to);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   // Markings: painted white on grass, and how you read your position at speed.
@@ -235,7 +271,31 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
       );
       ctx.stroke();
     }
+
+    // Dashed lane lines running out from the goal area, which give the long
+    // empty stretch either side of the halfway line something to read against.
+    ctx.save();
+    ctx.setLineDash([len(150), len(170)]);
+    ctx.lineWidth = len(16);
+    ctx.strokeStyle = 'rgba(250,252,255,0.5)';
+    for (const zs of [1, -1]) {
+      ctx.beginPath();
+      ctx.moveTo(px(sign * hl) - sign * len(700), pz(zs * (mouth + 900)));
+      ctx.lineTo(px(0) + sign * len(500), pz(zs * (mouth + 900)));
+      ctx.stroke();
+    }
+    ctx.restore();
   }
+
+  // A dashed ring around the centre, outside the circles.
+  ctx.save();
+  ctx.setLineDash([len(160), len(190)]);
+  ctx.lineWidth = len(16);
+  ctx.strokeStyle = 'rgba(250,252,255,0.45)';
+  ctx.beginPath();
+  ctx.arc(px(0), pz(0), len(1750), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 
   return finish(el);
 }

@@ -87,6 +87,39 @@ function footprintEdges(layout: ArenaLayout): Edge[] {
   return edges;
 }
 
+/**
+ * The footprint pushed outwards by `distance`, as a closed ring of corners.
+ *
+ * Translating each edge outwards on its own is not an offset polygon: the
+ * edges stay the same length while the ring they form gets bigger, so every
+ * corner opens into a V. At the arena's four cut corners that gap is thousands
+ * of units wide — which is exactly how the first facade managed to be a solid
+ * wall with daylight pouring through the corners of it.
+ *
+ * A real offset keeps the edges parallel to where they started and lets them
+ * grow, so the new corner is where the two offset lines cross.
+ */
+function offsetFootprint(edges: Edge[], distance: number): THREE.Vector2[] {
+  const corners: THREE.Vector2[] = [];
+  for (let i = 0; i < edges.length; i++) {
+    const a = edges[i]!;
+    const b = edges[(i + 1) % edges.length]!;
+    const pa = new THREE.Vector2().copy(a.mid).addScaledVector(a.normal, distance);
+    const pb = new THREE.Vector2().copy(b.mid).addScaledVector(b.normal, distance);
+    // pa + t*a.dir = pb + u*b.dir, solved for t by cross product.
+    const denom = a.dir.x * b.dir.y - a.dir.y * b.dir.x;
+    if (Math.abs(denom) < 1e-6) {
+      corners.push(pa);
+      continue;
+    }
+    const dx = pb.x - pa.x;
+    const dy = pb.y - pa.y;
+    const t = (dx * b.dir.y - dy * b.dir.x) / denom;
+    corners.push(new THREE.Vector2(pa.x + a.dir.x * t, pa.y + a.dir.y * t));
+  }
+  return corners;
+}
+
 /** A box placed along an edge, offset outwards, ready to be merged. */
 function edgeSlab(
   edge: Edge,
@@ -220,6 +253,41 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   bowl.name = 'bowl';
   group.add(bowl);
   for (const geo of slabs) geo.dispose();
+
+  // The back of the building.
+  //
+  // The bowl is steps rising outward and nothing behind them, so from the pitch
+  // you were looking straight through to the sky: above the top row, down the
+  // gangways, and through the wedges where one run of seating meets the next at
+  // a corner. Those showed as flat pink panels hanging in the stands, which is
+  // what a hole in a building looks like when the sky behind it is at dusk.
+  //
+  // One continuous facade closes all of it at once, and it is what a stadium
+  // actually has — you cannot see daylight through the back of a stand. A
+  // generous overlap is what makes the corners meet: the runs are rectangles
+  // rotated to each edge, and at the forty-five degree diagonals anything less
+  // leaves a wedge open.
+  const facadeParts: THREE.BufferGeometry[] = [];
+  const facadeOut = upper.inset + upper.rows * upper.tread + 120;
+  const facadeTop = upper.base + upper.rows * upper.rise + s.roofClearance + 220;
+  const ring = offsetFootprint(edges, facadeOut);
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % ring.length]!;
+    const span = new THREE.Vector2().subVectors(b, a);
+    const len = span.length();
+    if (len < 1) continue;
+    // A little longer than the gap it fills, so neighbouring runs overlap at
+    // the corner rather than meeting exactly and leaving a hairline of sky.
+    const slab = new THREE.BoxGeometry(len + 300, facadeTop, 260);
+    slab.rotateY(-Math.atan2(span.y, span.x));
+    slab.translate((a.x + b.x) / 2, facadeTop / 2, (a.y + b.y) / 2);
+    facadeParts.push(slab);
+  }
+  const facade = new THREE.Mesh(mergeGeometries(facadeParts, false), concrete);
+  facade.name = 'facade';
+  group.add(facade);
+  for (const geo of facadeParts) geo.dispose();
 
   // --- crowd -------------------------------------------------------------
   // A body with a head on it, rather than a box.
