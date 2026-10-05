@@ -35,9 +35,18 @@ export class ChaseCamera {
    * seam and a camera that teleports round the car at that moment is worse
    * than the problem being fixed.
    */
+  /**
+   * How much follow distance the walls took last frame, 0 to 1.
+   *
+   * Read one frame late on purpose: the clamp happens after the look target is
+   * chosen, and threading it the other way would mean clamping twice. The
+   * camera damps over several frames anyway, so a frame's lag is invisible.
+   */
+  private cornered = 0;
   private readonly up = new THREE.Vector3(0, 1, 0);
   private readonly surfaceUp = new THREE.Vector3(0, 1, 0);
   private readonly flat = new THREE.Vector3();
+  private readonly probe = new THREE.Vector3();
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {}
 
@@ -101,6 +110,18 @@ export class ChaseCamera {
         .addScaledVector(this.dir, distance)
         .addScaledVector(this.up, c.height);
 
+      // How much the walls refuse. Measured on the position the camera *wants*
+      // rather than on the one it ends up with: the lift below gives the
+      // distance back, so measuring afterwards reports almost no cornering and
+      // the look target never commits to the car — a feedback loop that hides
+      // exactly what it is meant to detect.
+      this.probe.copy(this.desired);
+      this.pushInside(this.probe);
+      this.cornered = Math.min(
+        1,
+        this.probe.distanceTo(this.desired) / Math.max(1, distance * c.corneredFull),
+      );
+
       const k = c.ballCamStiffness;
       this.pos.set(
         damp(this.pos.x, this.desired.x, k, dt),
@@ -112,7 +133,11 @@ export class ChaseCamera {
       // view off the wall until the car is behind the camera — so it gives way
       // to the follow camera's target, just ahead of the car along the wall.
       // The ball becomes context rather than the subject.
-      const bias = c.ballBias * (1 - wallness);
+      // Pulled towards the car both on a wall and when cornered. Lifting the
+      // camera to recover the distance the walls stole, without re-aiming,
+      // just drops the car out of the bottom of the frame — which is what the
+      // first attempt at this did.
+      const bias = c.ballBias * (1 - wallness) * (1 - this.cornered * c.corneredBiasDrop);
       this.tmp2.set(
         carPos.x + (ballPos.x - carPos.x) * bias,
         carPos.y + (ballPos.y - carPos.y) * bias,
@@ -173,7 +198,7 @@ export class ChaseCamera {
       );
     }
 
-    this.keepInside(this.pos);
+    this.keepInside(this.pos, carPos, distance);
     this.camera.position.copy(this.pos);
     if (this.shake > 0) {
       // Applied to the camera rather than the stored position, so the shake
@@ -215,14 +240,44 @@ export class ChaseCamera {
    * through the diagonals, which are the one place a round offset does not
    * protect.
    */
-  private keepInside(pos: THREE.Vector3): void {
+  private keepInside(
+    pos: THREE.Vector3,
+    carPos: { x: number; y: number; z: number },
+    wanted: number,
+  ): void {
+    const c = cfg.camera;
+    // Kept inside the building.
+    //
+    // Letting it sit outside instead was tried and is worse: the seating bowl
+    // starts 130 units beyond the boards, so a camera with enough room to keep
+    // its follow distance is inside the stands, looking at the back of a
+    // concrete tier.
+    this.pushInside(pos);
+
+    // Trade the stolen distance for height.
+    //
+    // Keeping the camera inside the building is not enough on its own: pinned
+    // against a wall it ends up on top of the car — measured at 114 units away
+    // where open play gives 292 — and you lose any sense of where you are.
+    // Whatever the walls take off the follow distance is added as lift
+    // instead, so being cornered raises the view rather than shrinking it.
+    const shortfall =
+      wanted - Math.hypot(pos.x - carPos.x, pos.y - carPos.y, pos.z - carPos.z);
+    if (shortfall > 1) {
+      pos.addScaledVector(this.up, shortfall * c.cornerLift);
+      this.pushInside(pos);
+    }
+  }
+
+  /** Pushes a point back inside the playable box, cut corners included. */
+  private pushInside(pos: THREE.Vector3): void {
     const a = cfg.arena;
-    const m = cfg.camera.wallMargin;
+    const c = cfg.camera;
+    const m = c.wallMargin;
     pos.x = Math.min(a.halfLength - m, Math.max(-a.halfLength + m, pos.x));
     pos.z = Math.min(a.halfWidth - m, Math.max(-a.halfWidth + m, pos.z));
-    pos.y = Math.min(a.ceiling - m, Math.max(m, pos.y));
+    pos.y = Math.min(a.ceiling - m, Math.max(c.floorMargin, pos.y));
 
-    // The cut corners: |x| + |z| may not exceed the corner plane.
     const corner = a.cornerPlane - m * 1.4;
     const reach = Math.abs(pos.x) + Math.abs(pos.z);
     if (reach > corner) {

@@ -799,6 +799,53 @@ describe('walls and the ceiling', () => {
     expect(r.lowestUpness).toBeGreaterThan(0);
   });
 
+  /** Parks a car on the ceiling at a given speed and sees how long it hangs. */
+  function hangFromCeiling(speed: number, seconds = 3) {
+    phys = new PhysicsWorld();
+    createArena(phys);
+    ball = new Ball(phys);
+    const y = cfg.arena.ceiling - (cfg.car.hitbox.height / 2 + cfg.car.rideHeight);
+    car = new Car(phys, { x: -2500, y, z: 0 }, 0, 0);
+    // Inverted: roof pointing down at the pitch.
+    car.body.setRotation({ x: 1, y: 0, z: 0, w: 0 }, true);
+    car.body.setLinvel({ x: speed, y: 0, z: 0 }, true);
+    car.boost = cfg.boost.max;
+
+    const dt = cfg.physics.fixedDt;
+    let held = 0;
+    for (let i = 0; i < Math.round(seconds / dt); i++) {
+      car.input = { ...emptyInput(), throttle: speed > 100 ? 1 : 0 };
+      car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+      if (car.position.y > cfg.arena.ceiling - 200) held += dt;
+      else break;
+    }
+    return held;
+  }
+
+  it('falls off the ceiling when it runs out of speed', () => {
+    // The ceiling is not flypaper. Cancelling the part of gravity that peels
+    // the car off outright let it sit up there at a standstill, which reads as
+    // being stuck rather than as driving.
+    // Measured in whole seconds of hanging, and the fall itself takes a
+    // moment: the car has to drop 200 units before this stops counting, which
+    // at the peel rate is most of a second on its own.
+    const stopped = hangFromCeiling(0);
+    const crawling = hangFromCeiling(300);
+    const quick = hangFromCeiling(1200);
+    expect(stopped).toBeLessThan(1.2);
+    expect(crawling).toBeLessThan(1.5);
+    // The ordering is the real claim: speed is what keeps you up there.
+    expect(quick).toBeGreaterThan(crawling * 2);
+  });
+
+  it('hangs on while it is moving', () => {
+    // And it has to be worth doing, or nobody would go up there.
+    expect(hangFromCeiling(1200)).toBeGreaterThan(2.5);
+  });
+
   it('holds a steady ride height on the floor still', () => {
     // The guard on the fix above. Turning the velocity onto the surface on
     // every frame, rather than only on a real transition, fights the

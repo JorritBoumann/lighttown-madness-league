@@ -526,19 +526,28 @@ export class Car {
     // Press into the surface so the car holds walls and the seam ramps.
     this.vel.addScaledVector(n, -c.stickForce * dt);
 
-    // And cancel the part of gravity that peels the car off the surface, so
-    // the stick force above is holding the car rather than fighting a losing
-    // battle with the weight of it.
+    // Hanging from an overhead surface, and you have to earn it with speed.
     //
-    // On the floor this is nothing and on a vertical wall it is nothing:
-    // gravity slides you down a wall, it does not pull you off it. It only
-    // matters where the surface is overhead, which is exactly where the car
-    // could not stay before — stick force is 325 and gravity is 650, so the
-    // ceiling peeled the car away at 325 whatever it did.
+    // On the floor this is nothing, and on a vertical wall it is nothing:
+    // gravity slides you down a wall, it does not pull you off one. It only
+    // matters where the surface is overhead, where stick force is 325 against
+    // gravity's 650 and the ceiling peels the car away whatever it does.
+    //
+    // Cancelling that peel outright is what made the ceiling flypaper: the car
+    // could sit up there indefinitely at a standstill, which is nonsense and
+    // reads as being stuck. So the cancellation is earned by speed, the way
+    // anything staying on the inside of a loop earns it. At `ceilingHoldSpeed`
+    // the car holds; slowing below that hands it back to gravity in
+    // proportion, and at a standstill it simply falls off.
+    //
+    // The arena's ceiling is flat, so there is no radius to put a real v^2/r
+    // against: this is an arcade allowance with a speed gate on it, not a
+    // derivation, and it is written that way on purpose.
     const peel = Math.max(0, -n.y);
     if (peel > 0) {
       const gravity = -cfg.physics.gravity;
-      this.vel.addScaledVector(n, -gravity * peel * c.ceilingStick * dt);
+      const held = Math.min(1, this.speed / c.ceilingHoldSpeed);
+      this.vel.addScaledVector(n, -gravity * peel * c.ceilingStick * held * dt);
     }
 
     this.body.setLinvel({ x: this.vel.x, y: this.vel.y, z: this.vel.z }, true);

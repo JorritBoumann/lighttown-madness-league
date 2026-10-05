@@ -103,6 +103,15 @@ export const config = {
      */
     ceilingStick: 1,
     /**
+     * How fast the car has to be moving to hang from an overhead surface.
+     *
+     * Below this, gravity gets its share back in proportion and the car
+     * peels off; at a standstill it drops outright. Without it the ceiling is
+     * flypaper and you can park on it, which reads as being stuck rather than
+     * as driving.
+     */
+    ceilingHoldSpeed: 900,
+    /**
      * How fast the car has to be heading into a surface before its velocity is
      * turned onto it rather than absorbed by the contact. Above the suspension
      * settling into the floor, well below anything a seam produces.
@@ -704,8 +713,18 @@ export const config = {
     /** How far the look target is lifted off a wall, so the car sits in the
      *  lower middle of the frame with the pitch beyond it. */
     wallLookLift: 160,
+    /** How much of the follow distance the walls steal is given back as
+     *  height. 1 keeps the camera the same distance away, straight up. */
+    cornerLift: 0.85,
+    /** How far the look target swings back to the car while cornered, so the
+     *  raised camera is looking down at it rather than over its head. */
+    corneredBiasDrop: 1,
     /** How far inside the walls the camera is kept, in uu. */
     wallMargin: 120,
+    /** The share of the follow distance that counts as fully cornered. */
+    corneredFull: 0.35,
+    /** The camera never goes below this, so it cannot end up under the pitch. */
+    floorMargin: 60,
     /** The slow orbit behind the title and summary screens. */
     menuOrbitSpeed: 0.055,
     /** Inside the bowl, not outside it: the walls are solid, so a camera

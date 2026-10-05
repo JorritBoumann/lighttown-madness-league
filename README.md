@@ -131,10 +131,24 @@ things had to change before the view was actually usable.
   Aiming at a point most of the way to the ball from a wall swings the view out
   over the pitch until the car is behind the camera.
 
-Behind all that, the camera is kept inside the arena as a backstop, corner cuts
-included — easing means it is briefly still working off the old surface during
-a transition, and a seam can push it through a wall for a frame or two, which is
-long enough to see the outside of the building.
+Behind all that, the camera is kept inside the arena, corner cuts included.
+Letting it sit outside instead was tried and is worse: the seating bowl starts
+130 units beyond the boards, so a camera with room to keep its follow distance
+out there is inside the stands, looking at the back of a concrete tier.
+
+**Being inside is not the whole job.** Pinned against the boards the camera had
+nowhere to go and sat 114 units from the car where open play gives 292 — no
+sense of where you were, which is a complaint the clamp caused rather than
+cured. Whatever the walls take off the follow distance is now given back as
+height, and the look target swings to the car as that happens: raised above the
+car and slightly in front of it, the only view containing the car is one aimed
+at the car, and a target still part way to the ball points out over the pitch
+with the car behind the camera.
+
+That cornering has to be measured on the position the camera *wants*, before
+the lift compensates. Measuring what it ends up with reports almost no
+cornering, because the lift already gave the distance back — a feedback loop
+that hides the thing it is meant to detect, and it took two goes to spot.
 
 Tested on walls, the ceiling and a cut corner, that it stands off rather than
 pressing against the glass, that the car stays in shot, and — the one that

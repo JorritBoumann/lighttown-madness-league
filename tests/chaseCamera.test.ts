@@ -96,6 +96,36 @@ describe('chase camera inside the arena', () => {
     expect(Math.abs(p.x)).toBeLessThan(1);
   });
 
+  it('keeps its distance when pinned against the boards', () => {
+    // Being inside is not the whole job. Pinned against a wall the camera had
+    // nowhere to go and sat 114 units from the car where open play gives 292,
+    // which is the "no overview" complaint. Whatever the walls take off the
+    // follow distance is given back as height instead.
+    const car = { x: 0, y: 40, z: 3950 };
+    const { camera } = run({ car, normal: FLOOR, ball: { x: 0, y: 95, z: -1500 } });
+    const away = Math.hypot(
+      camera.position.x - car.x,
+      camera.position.y - car.y,
+      camera.position.z - car.z,
+    );
+    expect(away).toBeGreaterThan(220);
+    // And it buys that back by rising, not by pushing through the wall.
+    expect(camera.position.y).toBeGreaterThan(200);
+  });
+
+  it('looks at the car once the walls have taken the distance', () => {
+    // Raised above the car and slightly in front of it, the only view that
+    // contains the car is one aimed at the car. A target still part way to the
+    // ball points out over the pitch with the car behind the camera.
+    const car = { x: 0, y: 40, z: 3950 };
+    const { camera } = run({ car, normal: FLOOR, ball: { x: 0, y: 95, z: -1500 } });
+    camera.updateMatrixWorld(true);
+    const p = new THREE.Vector3(car.x, car.y, car.z).project(camera);
+    expect(p.z).toBeLessThan(1);
+    expect(Math.abs(p.x)).toBeLessThan(1);
+    expect(Math.abs(p.y)).toBeLessThan(1);
+  });
+
   it('leaves the floor exactly as it was', () => {
     // Everything above must cost nothing on the pitch, which is where the
     // camera spends almost all of its time.
