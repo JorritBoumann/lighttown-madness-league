@@ -451,6 +451,31 @@ point nothing obviously points at the arena.
 The bundle carries roughly 20kB gzipped for three's postprocessing and geometry
 utilities.
 
+## The run summary
+
+When a run ends: what you did, then the run round by round.
+
+Ten figures — goals, conceded, ball touches, hardest touch, top speed, distance,
+time supersonic, share of time airborne, boost pads, boost used — and under them
+every round in order with its scoreline, the boss rounds badged and the round
+that ended the run marked. A gauntlet run is a story, and the scoreline of the
+round that killed it is the part anyone actually wants to see.
+
+Distance is shown in kilometres because a run covers hundreds of thousands of
+Unreal Units and "412,000 uu" means nothing to anybody; 1 uu is a centimetre.
+Boost spent is measured from what the tank actually lost rather than from the
+drain rate, which would count boost the car never had — holding the button on an
+empty tank does nothing.
+
+Two things worth knowing about how it is collected:
+
+- **Only while actually driving.** A countdown, a replay or a paused game would
+  otherwise pile up airborne seconds while the car sits on its line, and the
+  summary would be quietly wrong in a way nobody would think to check.
+- **The summary takes its own copy.** It stays on screen while the player starts
+  another run, and a run resets its stats in place — sharing the object blanks
+  the screen they are still reading. There is a test for exactly that.
+
 ## Goal replays
 
 After a goal: the celebration plays live, then the last few seconds play back

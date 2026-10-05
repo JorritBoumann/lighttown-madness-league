@@ -525,3 +525,76 @@ html, body {
   letter-spacing: 0.1em;
   color: rgba(220, 230, 246, 0.55);
 }
+
+/* Run summary: the numbers, then the run round by round. */
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin: 14px 0 16px;
+}
+.summary-stats .stat {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  padding: 8px 6px;
+  text-align: center;
+}
+.summary-stats .stat b {
+  display: block;
+  font-size: 17px;
+  font-weight: 650;
+  color: #eaf1fb;
+  font-variant-numeric: tabular-nums;
+}
+.summary-stats .stat span {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(198, 212, 234, 0.6);
+}
+
+.summary-rounds {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.summary-rounds li {
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+}
+.summary-rounds .n {
+  color: rgba(190, 206, 230, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+.summary-rounds .what { color: #dce6f6; }
+.summary-rounds .score {
+  font-variant-numeric: tabular-nums;
+  color: rgba(214, 228, 248, 0.85);
+}
+/* The round that ended it, marked in the colour the HUD uses for conceding. */
+.summary-rounds li.lost .what,
+.summary-rounds li.lost .score { color: #ff9377; }
+.summary-rounds li.boss .what::after {
+  content: 'boss';
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: rgba(255, 193, 77, 0.16);
+  color: #ffc14d;
+}
+.best-line { margin: 2px 0 0; font-size: 13px; color: #ffc14d; }
+.best-line.muted { color: rgba(198, 212, 234, 0.6); }

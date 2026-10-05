@@ -239,3 +239,76 @@ describe('best run', () => {
     expect(loadBestRun()).toBe(null);
   });
 });
+
+/**
+ * The run summary's round-by-round log and its driving figures.
+ *
+ * The log is what turns a summary into an account of the run, so what matters
+ * is that it records every round including the one that ended it, that the
+ * boss rounds are marked, and — the part that would break silently — that the
+ * summary keeps its own copy, since the run's stats are reset the moment
+ * someone starts another one.
+ */
+describe('run summary', () => {
+  it('logs every round, cleared and lost', () => {
+    const run = new Run({}, seeded(4));
+    run.start();
+    clearRound(run, [3, 1]);
+    clearRound(run, [2, 0]);
+    run.finishRound(loss([1, 2]), 40);
+
+    const summary = run.summary!;
+    expect(summary.rounds).toHaveLength(3);
+    expect(summary.rounds.map((r) => r.index)).toEqual([1, 2, 3]);
+    expect(summary.rounds.map((r) => r.cleared)).toEqual([true, true, false]);
+    // Player's score first, as everywhere else.
+    expect(summary.rounds[0]!.score).toEqual([3, 1]);
+    expect(summary.rounds[2]!.score).toEqual([1, 2]);
+  });
+
+  it('marks the boss rounds', () => {
+    const run = new Run({}, seeded(9));
+    run.start();
+    for (let i = 0; i < 4; i++) clearRound(run);
+    run.finishRound(loss(), 50);
+
+    const summary = run.summary!;
+    // Every fifth round is a boss, and round five is where this run died.
+    expect(summary.rounds.map((r) => r.boss)).toEqual([false, false, false, false, true]);
+  });
+
+  it('keeps its own copy of the stats', () => {
+    // The summary is on screen while the player starts another run, and the
+    // run resets its stats in place. Sharing the object blanks the screen
+    // they are still reading.
+    const run = new Run({}, seeded(11));
+    run.start();
+    run.stats.driving.distance = 123456;
+    run.stats.driving.topSpeed = 2300;
+    run.finishRound(loss(), 30);
+
+    const summary = run.summary!;
+    expect(summary.driving.distance).toBe(123456);
+    expect(summary.rounds).toHaveLength(1);
+
+    run.start();
+    expect(run.stats.driving.distance).toBe(0);
+    expect(summary.driving.distance).toBe(123456);
+    expect(summary.driving.topSpeed).toBe(2300);
+    expect(summary.rounds).toHaveLength(1);
+  });
+
+  it('starts a new run with nothing carried over', () => {
+    const run = new Run({}, seeded(13));
+    run.start();
+    clearRound(run);
+    run.stats.driving.pads = 12;
+    run.finishRound(loss(), 20);
+
+    run.start();
+    expect(run.stats.driving.pads).toBe(0);
+    expect(run.stats.roundsCleared).toBe(0);
+    run.finishRound(loss(), 10);
+    expect(run.summary!.rounds).toHaveLength(1);
+  });
+});

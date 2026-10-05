@@ -66,27 +66,58 @@ export class Shell {
 
   showSummary(summary: RunSummary, upgrades: readonly Upgrade[], best: BestRun | null): void {
     this.screen = 'summary';
+
     const chips = tally(upgrades)
       .map((e) => `<i>${escapeHtml(e.count > 1 ? `${e.upgrade.name} x${e.count}` : e.upgrade.name)}</i>`)
       .join('');
-    const bestLine =
-      summary.newBest
-        ? '<dt>Record</dt><dd class="best">New best run</dd>'
-        : best
-          ? `<dt>Best</dt><dd>round ${best.reachedRound}, ${best.roundsCleared} cleared</dd>`
-          : '';
 
-    this.screen = 'summary';
+    // Round by round, because a gauntlet run is a story and the scoreline of
+    // the round that ended it is the part anyone wants to see.
+    const rounds = summary.rounds
+      .map((r) => {
+        const result = r.cleared ? 'cleared' : 'lost';
+        return `<li class="${result}${r.boss ? ' boss' : ''}">
+          <span class="n">${r.index}</span>
+          <span class="what">${escapeHtml(r.label)}</span>
+          <span class="score">${r.score[0]}&ndash;${r.score[1]}</span>
+        </li>`;
+      })
+      .join('');
+
+    const d = summary.driving;
+    const played = Math.max(1, summary.duration);
+    // Distance in kilometres: a run covers tens of thousands of Unreal Units,
+    // and "412,000 uu" means nothing to anybody. 1 uu is 1cm.
+    const km = (d.distance / 100000).toFixed(2);
+    const stat = (label: string, value: string): string =>
+      `<div class="stat"><b>${value}</b><span>${label}</span></div>`;
+
+    const statsHtml = [
+      stat('Goals', `${summary.goalsFor}`),
+      stat('Conceded', `${summary.goalsAgainst}`),
+      stat('Ball touches', `${d.touches}`),
+      stat('Hardest touch', `${Math.round(d.hardestTouch)}`),
+      stat('Top speed', `${Math.round(d.topSpeed)}`),
+      stat('Distance', `${km}km`),
+      stat('Supersonic', formatDuration(d.supersonicSeconds)),
+      stat('Airborne', `${Math.round((d.airborneSeconds / played) * 100)}%`),
+      stat('Boost pads', `${d.pads}`),
+      stat('Boost used', `${Math.round(d.boostSpent)}`),
+    ].join('');
+
+    const bestLine = summary.newBest
+      ? '<p class="best-line">A new best run.</p>'
+      : best
+        ? `<p class="best-line muted">Best: round ${best.reachedRound}, ${best.roundsCleared} cleared.</p>`
+        : '';
+
     this.menu.show({
       title: summary.lost ? 'Run over' : 'Run abandoned',
-      subtitle: `Reached round ${summary.reachedRound}`,
+      subtitle: `Reached round ${summary.reachedRound} · ${summary.roundsCleared} cleared · ${formatDuration(summary.duration)} played`,
       bodyHtml: `
-        <dl>
-          <dt>Rounds cleared</dt><dd>${summary.roundsCleared}</dd>
-          <dt>Goals</dt><dd>${summary.goalsFor} for, ${summary.goalsAgainst} against</dd>
-          <dt>Time played</dt><dd>${formatDuration(summary.duration)}</dd>
-          ${bestLine}
-        </dl>
+        ${bestLine}
+        <div class="summary-stats">${statsHtml}</div>
+        ${rounds ? `<ol class="summary-rounds">${rounds}</ol>` : ''}
         ${chips ? `<div class="chips">${chips}</div>` : ''}`,
       items: [
         { id: 'again', label: 'Run it again' },

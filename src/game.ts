@@ -96,6 +96,8 @@ export class Game {
   /** Goal replays, and the countdown to one starting. */
   private readonly replay = new Replay();
   private replayPending = -1;
+  /** Last frame's boost, so spending can be measured from the tank. */
+  private lastBoost = cfg.boost.start;
   /** The ring thrown off when a car crosses into supersonic. */
   private readonly sonicRing: THREE.Mesh;
   private readonly sonicRingMaterial: THREE.MeshBasicMaterial;
@@ -528,6 +530,7 @@ export class Game {
     if (driving) {
       this.pads.update(dt, cars);
       for (const picked of this.pads.justPicked) {
+        if (picked.car === this.player.car) this.run.stats.driving.pads++;
         this.sound.pad(picked.pad.big);
         this.particles.burst({ x: picked.pad.x, y: 40, z: picked.pad.z }, picked.pad.big ? 18 : 8, {
           colour: TRAIL_COLOUR_BLUE,
@@ -540,6 +543,8 @@ export class Game {
 
     this.phys.step();
     this.drainContactEvents();
+
+    if (driving) this.recordDriving(dt);
 
     if (live && !this.freePlay) {
       this.match.update(dt, { position: this.ball.position, radius: cfg.ball.radius });
@@ -575,7 +580,15 @@ export class Game {
       life: 0.35,
     });
     // Only the player's own touches shake the view, or a scrum is unreadable.
-    if (!entry.bot) this.chase.kick(Math.min(14, closing / 220));
+    if (!entry.bot) {
+      this.chase.kick(Math.min(14, closing / 220));
+      const driving = this.run.stats.driving;
+      driving.touches++;
+      // The speed the ball leaves at, not the closing speed: that is the
+      // number anyone means by how hard they hit it.
+      const left = Math.hypot(bv.x, bv.y, bv.z);
+      driving.hardestTouch = Math.max(driving.hardestTouch, left);
+    }
   }
 
   /** Holds a body still, for the countdown and after full time. */
@@ -865,6 +878,31 @@ export class Game {
         drag: 2.0,
       });
     }
+  }
+
+  /**
+   * Accumulates what the player did, for the run summary.
+   *
+   * Only while actually driving: a countdown, a replay or a paused game would
+   * otherwise pile up airborne seconds while the car sits on its line, and the
+   * summary would be quietly wrong in a way nobody would think to check.
+   */
+  private recordDriving(dt: number): void {
+    const car = this.player.car;
+    const d = this.run.stats.driving;
+    const speed = car.speed;
+
+    d.distance += speed * dt;
+    if (speed > d.topSpeed) d.topSpeed = speed;
+    if (car.isSupersonic) d.supersonicSeconds += dt;
+    if (!car.grounded) d.airborneSeconds += dt;
+
+    // Boost spent, from what the tank actually lost. Reading the drain rate
+    // would count boost the car never had, since holding the button with an
+    // empty tank does nothing.
+    const burned = this.lastBoost - car.boost;
+    if (burned > 0) d.boostSpent += burned;
+    this.lastBoost = car.boost;
   }
 
   /**
