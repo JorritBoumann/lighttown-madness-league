@@ -467,7 +467,24 @@ export const config = {
     boost: 0.18,
   },
 
+  render: {
+    /** Tone-mapping exposure. Higher is brighter before the filmic rolloff. */
+    exposure: 0.92,
+    /** How much the sky gradient lights the scene through reflections. */
+    environmentIntensity: 0.4,
+    /** Bloom: threshold is the brightness a pixel needs before it blooms. */
+    bloomStrength: 0.42,
+    bloomRadius: 0.5,
+    bloomThreshold: 0.78,
+  },
+
   camera: {
+    /** The slow orbit behind the title and summary screens. */
+    menuOrbitSpeed: 0.055,
+    /** Inside the bowl, not outside it: the walls are solid, so a camera
+     *  further out than the pitch just looks at the back of a hoarding. */
+    menuOrbitRadius: 3500,
+    menuOrbitHeight: 1700,
     /** Rocket League's own camera defaults. */
     fov: 110,
     distance: 270,

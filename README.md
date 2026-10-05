@@ -156,6 +156,64 @@ The title and summary screens hide the gameplay HUD behind them — a scoreboard
 and a round number describing a round nobody is playing read as a bug. The pause
 screen keeps it, so you can see the state you are returning to.
 
+## The look
+
+No image files. Everything on screen is geometry or a texture painted onto a
+canvas at startup, the same decision as the synthesised audio, which is also why
+the pitch can be repainted when a round narrows the nets rather than leaving
+markings where the posts used to be.
+
+What was actually wrong with the first version, in order of how much it mattered:
+
+- **No stadium.** The arena floated in a void, and a stadium is mostly the
+  stadium. There is now a raked bowl of fourteen tiers starting at the top of
+  the wall, a crowd, and floodlights at the corners. The crowd is a single
+  instanced mesh, so several thousand spectators cost one draw call.
+- **No pitch.** Markings were drawn as lines, and a line cannot carry mowing
+  stripes, a tinted end, or enough thickness to read at speed — at a distance a
+  one-pixel line either shimmers or vanishes. The pitch is now a painted
+  texture: stripes, halfway line, centre circles, goal areas, keeper arcs,
+  corner arcs, and a tinted area at each end so which way you are attacking is
+  readable without looking at the scoreboard.
+- **Flat lighting.** There was no tone mapping, so the bright end crushed to
+  white and everything else read as the same navy. ACES filmic tone mapping, a
+  sky gradient used as the environment map — metal with nothing to reflect is
+  just its base colour, however many lights you point at it — and a shadow
+  camera fitted to the pitch rather than loosely around it.
+- **The car was a box.** See below.
+- **Nothing glowed.** A bloom pass, thresholded at 0.78: low enough and the
+  white pitch markings start to glow, which reads as a bug rather than an
+  effect.
+
+**The car took three attempts, and the first two failed the same way.** Placing
+the corners of a hull by hand is easy to get wrong in a way that is hard to
+read back from the code: one station's width wrong and the body comes out as a
+splayed flat plate with a dark box sitting on it, which is what shipped in both
+early versions. It is now an extruded side profile — low nose, rising bonnet,
+a greenhouse set back and inset from the shoulders — because a car is
+recognisable by its silhouette, so the silhouette is the thing worth describing
+directly. A few units of bevel on every edge is what stops it looking like cut
+card.
+
+Two things worth knowing if you change any of this:
+
+- **The vertical layout comes from the ride height, not from taste.** The hitbox
+  floats `rideHeight` above the ground, so in the mesh's own frame the ground is
+  at `-(hy + rideHeight)` and a wheel of radius r sits exactly r above it. The
+  first version used `-hy + radius * 0.2`, which buries the wheels inside the
+  bodywork.
+- **Wheel x positions are the real suspension stations; the z is not.** The
+  suspension sits 26-30 units off centre inside a hitbox 87 wide, and a wheel
+  drawn there is invisible. The visible track is pushed out to the bodyside.
+
+Textures are disposed along with the arena when a round rebuilds it. The pitch
+alone is a 2560 by 2048 canvas, so leaving the maps behind leaks megabytes per
+round — the sort of thing that only shows twenty rounds into a run, by which
+point nothing obviously points at the arena.
+
+The cost of all of it: about 106 draw calls and 60,000 triangles for a full
+arena, and roughly 17kB gzipped on the bundle for three's postprocessing passes.
+
 ## Sound and effects
 
 **Sound** ([`src/audio/sound.ts`](src/audio/sound.ts)) is synthesised with Web

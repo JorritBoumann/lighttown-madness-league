@@ -1,11 +1,18 @@
 import * as THREE from 'three';
 import { cfg } from '../config';
 import { buildArenaLayout, type ArenaLayout } from '../core/arenaLayout';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { skyTexture, pitchTexture, netTexture, wallTexture } from './textures';
 
 export interface Renderer {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** Draws a frame. Goes through the bloom chain when it is on. */
+  draw(): void;
   resize(): void;
 }
 
@@ -14,49 +21,93 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Filmic tone mapping rather than three's default clamp. Without it the
+  // bright end crushes to white and everything in shadow reads as the same
+  // flat navy, which is most of why the first version looked washed out.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = cfg.render.exposure;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0d16);
+  const sky = skyTexture();
+  scene.background = sky;
+  // The same gradient as the environment map, so metal has something to
+  // reflect. A metallic surface with no environment is just its base colour,
+  // however many lights are pointed at it.
+  scene.environment = sky;
+  scene.environmentIntensity = cfg.render.environmentIntensity;
+  // Far out on purpose. The camera can sit ten thousand units from the far
+  // goal, so fog that starts anywhere near the pitch turns the whole far half
+  // into haze — which is exactly what the first attempt did.
+  scene.fog = new THREE.Fog(0xaec6dc, 26000, 52000);
 
   // Near and far have to suit a pitch 10240 long.
   const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1, 10, 40000);
   camera.position.set(-2000, 400, 0);
 
-  const hemi = new THREE.HemisphereLight(0xa8c8ff, 0x2a3348, 1.1);
+  // Sky above, pitch bounce below.
+  const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x3f5a35, 0.32);
   scene.add(hemi);
 
   // Low fill from the far end, so the car reads against the floor at both ends.
-  const fill = new THREE.DirectionalLight(0x6f9bd8, 0.4);
+  const fill = new THREE.DirectionalLight(0x9fc4f0, 0.35);
   fill.position.set(-4000, 2000, -2000);
   scene.add(fill);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+  const sun = new THREE.DirectionalLight(0xfff4e2, 2.3);
   sun.position.set(2500, 5000, 2000);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  const span = cfg.arena.halfLength * 1.2;
-  sun.shadow.camera.left = -span;
-  sun.shadow.camera.right = span;
-  sun.shadow.camera.top = span;
-  sun.shadow.camera.bottom = -span;
+  // Tight to the pitch rather than loose around it: the same map stretched
+  // over a bigger volume is what makes a shadow look like a smudge.
+  const spanX = cfg.arena.halfLength * 1.05;
+  const spanZ = cfg.arena.halfWidth * 1.3;
+  sun.shadow.camera.left = -spanX;
+  sun.shadow.camera.right = spanX;
+  sun.shadow.camera.top = spanZ;
+  sun.shadow.camera.bottom = -spanZ;
   sun.shadow.camera.near = 100;
   sun.shadow.camera.far = 16000;
+  sun.shadow.bias = -0.0006;
+  sun.shadow.normalBias = 8;
   scene.add(sun);
 
   // The arena mesh is owned by the game, not the renderer: a round modifier can
   // change the goal dimensions, and then it has to be rebuilt.
 
+  // Bloom, for the boost flame, the pads and the lit goal mouths. Only the
+  // bright end blooms: a threshold below about 0.7 and the white pitch
+  // markings start to glow, which looks like a mistake rather than an effect.
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(1, 1),
+    cfg.render.bloomStrength,
+    cfg.render.bloomRadius,
+    cfg.render.bloomThreshold,
+  );
+  composer.addPass(bloom);
+  // The composer works in linear space, so tone mapping has to happen at the
+  // end of the chain instead of in the renderer. Without this pass the image
+  // comes out of the composer looking blown out.
+  composer.addPass(new OutputPass());
+
   function resize(): void {
     const w = canvas.clientWidth || window.innerWidth;
     const h = canvas.clientHeight || window.innerHeight;
     renderer.setSize(w, h, false);
+    composer.setSize(w, h);
+    bloom.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
   resize();
   window.addEventListener('resize', resize);
 
-  return { renderer, scene, camera, resize };
+  function draw(): void {
+    composer.render();
+  }
+
+  return { renderer, scene, camera, draw, resize };
 }
 
 /** Visual arena, built from the same layout the colliders use. */
@@ -65,34 +116,39 @@ export function buildArenaMesh(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'arena';
 
+  // The floor panel keeps a plain material: the markings go on a separate
+  // surface laid just above it, so the pitch can be repainted when a modifier
+  // changes the goals without touching the collider geometry's mesh.
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x2c3c61,
-    roughness: 0.85,
-    metalness: 0.05,
+    color: 0x24562e,
+    roughness: 0.95,
+    metalness: 0.0,
   });
+  const wallTex = wallTexture();
+  wallTex.repeat.set(4, 1);
   const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x3a4a72,
-    roughness: 0.55,
-    metalness: 0.2,
+    map: wallTex,
+    roughness: 0.42,
+    metalness: 0.08,
     side: THREE.DoubleSide,
   });
   const rampMat = new THREE.MeshStandardMaterial({
-    color: 0x44557f,
-    roughness: 0.6,
-    metalness: 0.2,
+    color: 0xc3cedd,
+    roughness: 0.38,
+    metalness: 0.12,
     side: THREE.DoubleSide,
   });
   // The ceiling is a playable surface but sits between the camera and the pitch,
   // so it is drawn as a faint shell rather than a solid lid.
   const ceilingMat = new THREE.MeshStandardMaterial({
-    color: 0x33415f,
+    color: 0x8f9aa9,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.04,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
   const goalBoxMat = new THREE.MeshStandardMaterial({
-    color: 0x1d2742,
+    color: 0x2b3340,
     roughness: 0.8,
     side: THREE.DoubleSide,
   });
@@ -119,86 +175,269 @@ export function buildArenaMesh(): THREE.Group {
     group.add(mesh);
   }
 
-  group.add(buildFloorMarkings(layout));
+  group.add(buildPitch(layout));
   // The ceiling is in shot most of the time. A grid on it keeps it reading as a
   // surface you could drive on rather than as empty space.
   group.add(buildCeilingGrid(layout));
+  group.add(buildStands(layout));
 
-  // Goal mouths, tinted per end.
   for (const goal of layout.goals) {
-    const mat = new THREE.MeshStandardMaterial({
-      color: goal.sign > 0 ? 0xff7043 : 0x42a5f5,
-      emissive: goal.sign > 0 ? 0x702a10 : 0x113a60,
-      emissiveIntensity: 0.6,
-      roughness: 0.4,
-      transparent: true,
-      opacity: 0.3,
+    group.add(buildGoal(goal));
+    // The wall either side of each net carries that end's colours, which is
+    // the cue you read when the pitch markings are out of shot.
+    const endTex = wallTexture(goal.sign > 0 ? 'orange' : 'blue');
+    endTex.repeat.set(1, 1);
+    const endMat = new THREE.MeshStandardMaterial({
+      map: endTex,
+      roughness: 0.42,
+      metalness: 0.08,
       side: THREE.DoubleSide,
     });
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(goal.width, goal.height), mat);
-    plane.position.set(goal.x, goal.height / 2, 0);
-    plane.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
-    group.add(plane);
-
-    // Frame around the mouth.
-    const hw = goal.width / 2;
-    const frame = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(goal.x, 2, -hw),
-      new THREE.Vector3(goal.x, goal.height, -hw),
-      new THREE.Vector3(goal.x, goal.height, hw),
-      new THREE.Vector3(goal.x, 2, hw),
-    ]);
-    group.add(
-      new THREE.Line(
-        frame,
-        new THREE.LineBasicMaterial({ color: goal.sign > 0 ? 0xffa183 : 0x8fd0ff }),
-      ),
-    );
+    const cheekWidth = (layout.halfWidth * 2 - goal.width) / 2;
+    for (const zs of [1, -1]) {
+      const cheek = new THREE.Mesh(
+        new THREE.PlaneGeometry(cheekWidth, layout.ceiling * 0.5),
+        endMat,
+      );
+      cheek.position.set(
+        goal.x - goal.sign * 4,
+        layout.ceiling * 0.25,
+        zs * (goal.width / 2 + cheekWidth / 2),
+      );
+      cheek.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
+      group.add(cheek);
+    }
   }
 
   return group;
 }
 
 /**
- * Floor grid, centre circle and halfway line. The grid is the main cue for
- * speed and distance; without it the arena reads as a flat void and nothing
- * feels fast.
+ * The painted pitch, as one textured plane just above the floor panel.
+ *
+ * It was drawn as lines before. Lines cannot carry mowing stripes, a tinted
+ * end, or markings thick enough to read at speed, and at a distance a one-pixel
+ * line either shimmers or disappears. A texture also means the goal areas are
+ * repainted to match when a modifier narrows the nets.
  */
-function buildFloorMarkings(layout: ArenaLayout): THREE.Group {
+function buildPitch(layout: ArenaLayout): THREE.Mesh {
+  const goalWidth = layout.goals[0]?.width ?? cfg.arena.goalWidth;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(layout.halfLength * 2, layout.halfWidth * 2),
+    new THREE.MeshStandardMaterial({
+      map: pitchTexture(layout, goalWidth),
+      roughness: 0.92,
+      metalness: 0.0,
+    }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 1;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** A net, a frame, and a lit mouth, per end. */
+function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
   const group = new THREE.Group();
+  const colour = goal.sign > 0 ? 0xff7043 : 0x42a5f5;
+  const hw = goal.width / 2;
+  const depth = cfg.arena.goalDepth;
+  const inward = -goal.sign;
+
+  // Netting on the back and sides of the box. Drawn as holes in a grid rather
+  // than a solid panel, which is the whole reason a goal reads as a goal.
+  // One netting material per panel, each with the tiling worked out from the
+  // panel's own size. Sharing one material stretches an eight-by-eight grid
+  // across the whole mouth, and the netting reads as a solid slab.
+  const CELL = 110;
+  const netPanel = (w: number, hgt: number): THREE.MeshStandardMaterial => {
+    const tex = netTexture();
+    tex.repeat.set(Math.max(1, Math.round(w / CELL)), Math.max(1, Math.round(hgt / CELL)));
+    return new THREE.MeshStandardMaterial({
+      map: tex,
+      alphaMap: tex,
+      transparent: true,
+      alphaTest: 0.4,
+      color: 0xeaf1ff,
+      roughness: 0.8,
+      side: THREE.DoubleSide,
+    });
+  };
+
+  const back = new THREE.Mesh(
+    new THREE.PlaneGeometry(goal.width, goal.height),
+    netPanel(goal.width, goal.height),
+  );
+  back.position.set(goal.x - inward * depth, goal.height / 2, 0);
+  back.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
+  group.add(back);
+
+  for (const zs of [1, -1]) {
+    const side = new THREE.Mesh(
+      new THREE.PlaneGeometry(depth, goal.height),
+      netPanel(depth, goal.height),
+    );
+    side.position.set(goal.x - (inward * depth) / 2, goal.height / 2, zs * hw);
+    group.add(side);
+  }
+  const roof = new THREE.Mesh(
+    new THREE.PlaneGeometry(depth, goal.width),
+    netPanel(depth, goal.width),
+  );
+  roof.position.set(goal.x - (inward * depth) / 2, goal.height, 0);
+  roof.rotation.x = Math.PI / 2;
+  roof.rotation.z = Math.PI / 2;
+  group.add(roof);
+
+  // Posts and crossbar, in the end's colour so which net is yours is obvious.
+  const frameMat = new THREE.MeshStandardMaterial({
+    color: colour,
+    emissive: colour,
+    emissiveIntensity: 0.55,
+    roughness: 0.3,
+    metalness: 0.4,
+  });
+  const r = 26;
+  for (const zs of [1, -1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(r, r, goal.height, 12), frameMat);
+    post.position.set(goal.x, goal.height / 2, zs * hw);
+    post.castShadow = true;
+    group.add(post);
+  }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(r, r, goal.width, 12), frameMat);
+  bar.rotation.x = Math.PI / 2;
+  bar.position.set(goal.x, goal.height, 0);
+  bar.castShadow = true;
+  group.add(bar);
+
+  // A glow across the mouth, so a goal is visible from the other end.
+  const mouth = new THREE.Mesh(
+    new THREE.PlaneGeometry(goal.width, goal.height),
+    new THREE.MeshBasicMaterial({
+      color: colour,
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  mouth.position.set(goal.x, goal.height / 2, 0);
+  mouth.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
+  group.add(mouth);
+
+  return group;
+}
+
+/**
+ * Stands, crowd and floodlights.
+ *
+ * Without them the arena floats in a void, which is the single biggest thing
+ * separating this from the references: a stadium is mostly the stadium. The
+ * crowd is one instanced mesh of flat quads — forty thousand of them cost
+ * nothing as instances and are indistinguishable from spectators at this
+ * distance.
+ */
+function buildStands(layout: ArenaLayout): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'stands';
   const hl = layout.halfLength;
   const hw = layout.halfWidth;
-  const spacing = 512;
-  const y = 2;
+  const tiers = 14;
+  const rise = 300;
+  const tread = 230;
+  const start = 160;
+  // The bowl starts at the top of the wall, not at floor level. Built from the
+  // floor up it is perfectly correct and completely invisible: the arena is a
+  // closed box, and the walls hide everything outside them.
+  const base = layout.ceiling;
 
-  const grid: number[] = [];
-  for (let x = -hl; x <= hl + 0.001; x += spacing) grid.push(x, y, -hw, x, y, hw);
-  for (let z = -hw; z <= hw + 0.001; z += spacing) grid.push(-hl, y, z, hl, y, z);
-  const gridGeo = new THREE.BufferGeometry();
-  gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(grid, 3));
-  group.add(
-    new THREE.LineSegments(
-      gridGeo,
-      new THREE.LineBasicMaterial({ color: 0x4f6ba3, transparent: true, opacity: 0.4 }),
-    ),
+  const concrete = new THREE.MeshStandardMaterial({ color: 0x8e99a8, roughness: 0.9 });
+  const seatGeo = new THREE.BoxGeometry(1, 1, 1);
+  const crowd: THREE.Matrix4[] = [];
+  const colours: THREE.Color[] = [];
+  // Muted clothing colours, not a rainbow: a crowd reads as a crowd because it
+  // is dense and slightly varied, and saturated specks look like confetti.
+  const palette = [0x2f3b52, 0x47536b, 0x8d4a3c, 0x3f6b8a, 0x6a6f7d, 0xa8b2c0].map(
+    (c) => new THREE.Color(c),
   );
 
-  const lineMat = new THREE.LineBasicMaterial({ color: 0x8fa8dc, transparent: true, opacity: 0.75 });
-  const circle: THREE.Vector3[] = [];
-  for (let i = 0; i <= 72; i++) {
-    const a = (i / 72) * Math.PI * 2;
-    circle.push(new THREE.Vector3(Math.cos(a) * 900, y + 1, Math.sin(a) * 900));
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const scale = new THREE.Vector3(70, 90, 70);
+  const pos = new THREE.Vector3();
+
+  for (let t = 0; t < tiers; t++) {
+    const inset = start + t * tread;
+    const y = base + t * rise;
+    const spanX = hl + inset;
+    const spanZ = hw + inset;
+
+    // The step itself, as four slabs round the bowl.
+    for (const [sx, sz, px, pz] of [
+      [spanX * 2 + tread * 2, tread, 0, spanZ + tread / 2],
+      [spanX * 2 + tread * 2, tread, 0, -spanZ - tread / 2],
+      [tread, spanZ * 2, spanX + tread / 2, 0],
+      [tread, spanZ * 2, -spanX - tread / 2, 0],
+    ] as [number, number, number, number][]) {
+      // Solid from the bowl floor to this tier's lip rather than a thin step:
+      // a staircase of floating slabs lets the sky through between the rows
+      // and reads as scaffolding.
+      const height = y - base + rise;
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(sx, height, sz), concrete);
+      slab.position.set(px, base + height / 2 - rise, pz);
+      group.add(slab);
+    }
+
+    // Spectators along each step.
+    const step = 150;
+    for (let x = -spanX; x <= spanX; x += step) {
+      for (const zs of [1, -1]) {
+        pos.set(x, y + 45, zs * (spanZ + tread / 2));
+        m.compose(pos, q, scale);
+        crowd.push(m.clone());
+        colours.push(palette[(crowd.length * 7) % palette.length]!);
+      }
+    }
+    for (let z = -spanZ; z <= spanZ; z += step) {
+      for (const xs of [1, -1]) {
+        pos.set(xs * (spanX + tread / 2), y + 45, z);
+        m.compose(pos, q, scale);
+        crowd.push(m.clone());
+        colours.push(palette[(crowd.length * 11) % palette.length]!);
+      }
+    }
   }
-  group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(circle), lineMat));
-  group.add(
-    new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, y + 1, -hw),
-        new THREE.Vector3(0, y + 1, hw),
-      ]),
-      lineMat,
-    ),
+
+  const seats = new THREE.InstancedMesh(
+    seatGeo,
+    new THREE.MeshStandardMaterial({ roughness: 0.85 }),
+    crowd.length,
   );
+  for (let i = 0; i < crowd.length; i++) {
+    seats.setMatrixAt(i, crowd[i]!);
+    seats.setColorAt(i, colours[i]!);
+  }
+  seats.instanceMatrix.needsUpdate = true;
+  if (seats.instanceColor) seats.instanceColor.needsUpdate = true;
+  group.add(seats);
+
+  // Floodlights at the corners, above the top tier.
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff6dd });
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x6d7786, roughness: 0.7 });
+  const top = base + tiers * rise;
+  for (const xs of [1, -1]) {
+    for (const zs of [1, -1]) {
+      const x = xs * (hl + start + tiers * tread * 0.8);
+      const z = zs * (hw + start + tiers * tread * 0.8);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(40, 60, top + 1500, 8), mastMat);
+      mast.position.set(x, (top + 1500) / 2, z);
+      group.add(mast);
+      const rig = new THREE.Mesh(new THREE.BoxGeometry(600, 160, 300), lampMat);
+      rig.position.set(x, top + 1500, z);
+      rig.lookAt(0, 0, 0);
+      group.add(rig);
+    }
+  }
 
   return group;
 }
@@ -220,13 +459,30 @@ function buildCeilingGrid(layout: ArenaLayout): THREE.LineSegments {
   );
 }
 
-/** Frees a built arena group's geometry and materials before dropping it. */
+/**
+ * Frees a built arena group before dropping it.
+ *
+ * Textures as well as geometry and materials. The arena is rebuilt whenever a
+ * round changes the goals, and the pitch alone is a 2560 by 2048 canvas, so
+ * leaving the maps behind leaks several megabytes per round — which only shows
+ * up twenty rounds into a long run, by which point nothing obviously points at
+ * the arena being the cause.
+ */
 export function disposeArenaMesh(group: THREE.Group): void {
+  const freeMaterial = (m: THREE.Material): void => {
+    for (const value of Object.values(m)) {
+      if (value instanceof THREE.Texture) value.dispose();
+    }
+    m.dispose();
+  };
   group.traverse((obj) => {
-    const mesh = obj as THREE.Mesh & { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
+    const mesh = obj as THREE.Mesh & {
+      geometry?: THREE.BufferGeometry;
+      material?: THREE.Material | THREE.Material[];
+    };
     mesh.geometry?.dispose();
     const mat = mesh.material;
-    if (Array.isArray(mat)) for (const m of mat) m.dispose();
-    else mat?.dispose();
+    if (Array.isArray(mat)) for (const m of mat) freeMaterial(m);
+    else if (mat) freeMaterial(mat);
   });
 }

@@ -104,6 +104,8 @@ export class Game {
   private lastCountdownBeep = -1;
   /** Tracks supersonic, so the whoosh fires on crossing rather than per frame. */
   private wasSupersonic = false;
+  /** Clock for the slow orbit behind the menus. */
+  private menuShotTime = 0;
   /** What the title screen last said about a pad, so it can be refreshed. */
   private titleShowedPad = false;
   /** Round modifiers. Reverted and re-applied every round. */
@@ -475,13 +477,29 @@ export class Game {
     this.updateContinuousAudio();
 
     const player = this.player;
-    this.chase.update(
-      dt,
-      player.mesh.position,
-      player.car.velocity,
-      player.car.forward(),
-      this.ballMesh.position,
-    );
+    if (this.screen === 'title' || this.screen === 'summary') {
+      // An establishing shot behind the menu rather than the chase camera's
+      // view from a parked car's bumper. The arena is the thing worth looking
+      // at on the way in, and the chase camera is snapped back into place when
+      // a round starts, so nothing inherits this position.
+      this.menuShotTime += dt;
+      const a = this.menuShotTime * cfg.camera.menuOrbitSpeed;
+      const cam = this.render.camera;
+      cam.position.set(
+        Math.cos(a) * cfg.camera.menuOrbitRadius,
+        cfg.camera.menuOrbitHeight,
+        Math.sin(a) * cfg.camera.menuOrbitRadius * 0.62,
+      );
+      cam.lookAt(0, 120, 0);
+    } else {
+      this.chase.update(
+        dt,
+        player.mesh.position,
+        player.car.velocity,
+        player.car.forward(),
+        this.ballMesh.position,
+      );
+    }
 
     this.handleHotkeys();
     this.hud.setDevice(this.controls.device);
@@ -490,7 +508,7 @@ export class Game {
     this.runHud.update(this.run, dt);
     this.controls.endFrame();
 
-    this.render.renderer.render(this.render.scene, this.render.camera);
+    this.render.draw();
   }
 
   private handleHotkeys(): void {
