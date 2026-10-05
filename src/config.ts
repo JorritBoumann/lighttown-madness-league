@@ -516,6 +516,8 @@ export const config = {
     /** Camera flashes in the crowd, and how often each one fires. */
     flashes: 420,
     flashRate: 0.22,
+    /** How much faster the cameras fire while a goal is being celebrated. */
+    flashCelebrationRate: 6,
     /** Height of the roof above the top row. */
     roofClearance: 900,
     /** Light shafts from the roof banks down onto the pitch. */
@@ -537,11 +539,63 @@ export const config = {
     carModel: 'assets/car.glb',
   },
 
+  /** The goal celebration. See render/goalMoment.ts. */
+  goal: {
+    /** A dead stop on contact, and how slow it runs during it. */
+    hitstop: 0.09,
+    hitstopScale: 0.06,
+    /** Seconds spent ramping back up to full speed afterwards. */
+    slowMotion: 0.85,
+    /** The expanding ring at the mouth. */
+    ringSeconds: 0.55,
+    ringRadius: 900,
+    ringOpacity: 0.85,
+    /** Particles: a fast white wave, then the team colour behind it. */
+    sparkCount: 70,
+    emberCount: 110,
+    /** The net taking the ball: how far it gives, how fast it stops ringing,
+     *  and how wide the dent is around where the ball went through. */
+    netBulge: 150,
+    netDamping: 3.4,
+    netRinging: 11,
+    netSpread: 230,
+    netSeconds: 1.6,
+    /** The frame and mouth flaring. */
+    flareSeconds: 0.7,
+    flareStrength: 2.6,
+    /**
+     * The mouth glow gets out of the way rather than brightening, as a
+     * fraction of its usual opacity.
+     *
+     * The glow is a full-width plane whose job is making a goal visible from
+     * the far end of the pitch. Flaring it does the opposite of what the
+     * celebration is for: it turns into a sheet across the mouth and hides the
+     * net taking the ball, which is the thing you actually want to watch. So
+     * it clears for the moment and comes back afterwards.
+     */
+    mouthClear: 0.25,
+    /** How long the crowd keeps going. */
+    crowdSeconds: 2.4,
+    /** When the whole thing is over and everything is put back. */
+    totalSeconds: 1.8,
+  },
+
   render: {
     /** Tone-mapping exposure. Higher is brighter before the filmic rolloff. */
     exposure: 1.02,
     /** How much the sky gradient lights the scene through reflections. */
-    environmentIntensity: 0.22,
+    /**
+     * How much the reflection map lights the scene.
+     *
+     * Much lower than it was, because what it is reflecting changed. The old
+     * map was a dim hand-drawn gradient; the arena's own capture contains the
+     * light banks at full white, so the same number washed the night look out
+     * — the floor went from navy to pale blue without anything in the lighting
+     * having been touched.
+     */
+    environmentIntensity: 0.07,
+    /** The same correction for the pitch, which reflects more than most. */
+    pitchEnvIntensity: 0.06,
     /** Face size for the arena's self-captured reflection map. 256 is plenty:
      *  it is blurred into a radiance map immediately afterwards. */
     envCaptureSize: 256,

@@ -29,6 +29,8 @@ export interface StadiumInfo {
 export interface Stadium {
   group: THREE.Group;
   update(dt: number, info: StadiumInfo): void;
+  /** Sets the crowd off: flashes come thick and fast for a few seconds. */
+  celebrate(seconds: number): void;
 }
 
 /** One straight run of the arena's footprint, with its outward normal. */
@@ -396,20 +398,32 @@ export function buildStadium(layout: ArenaLayout): Stadium {
 
   let elapsed = 0;
   let lastText = '';
+  let celebrating = 0;
 
   return {
     group,
+    celebrate(seconds) {
+      celebrating = Math.max(celebrating, seconds);
+    },
     update(dt, info) {
       elapsed += dt;
+      if (celebrating > 0) celebrating = Math.max(0, celebrating - dt);
 
       // Flashes: each speck owns a slot in a repeating cycle and is visible for
       // a few frames of it. Scaling to zero is cheaper than toggling visibility
       // on an instanced mesh and avoids rebuilding the draw list.
       for (let i = 0; i < flashCount; i++) {
-        const phase = (elapsed * s.flashRate + i * 0.6180339887) % 1;
-        const on = phase < 0.05;
+        // A goal multiplies both how often a camera fires and how long it
+        // stays lit, which is what turns the crowd from scenery into a
+        // reaction. The golden ratio offset keeps the specks from firing in
+        // visible rows.
+        const excited = celebrating > 0;
+        const rate = s.flashRate * (excited ? s.flashCelebrationRate : 1);
+        const window = excited ? 0.12 : 0.05;
+        const phase = (elapsed * rate + i * 0.6180339887) % 1;
+        const on = phase < window;
         const p = flashSeats[i]!;
-        const size = on ? 1 + (0.05 - phase) * 6 : 0;
+        const size = on ? 1 + (window - phase) * 6 : 0;
         matrix.makeScale(size, size, size);
         matrix.setPosition(p.x, p.y + 20, p.z);
         flashes.setMatrixAt(i, matrix);

@@ -451,6 +451,49 @@ point nothing obviously points at the arena.
 The bundle carries roughly 20kB gzipped for three's postprocessing and geometry
 utilities.
 
+## The goal moment
+
+Scoring used to be a number changing: a camera kick, one burst of particles, and
+two and a half seconds of waiting for the next kickoff. The scoreline is the
+point of the game and it was the least dramatic thing in it.
+
+It is choreography over the pause the match already took, all driven from one
+clock so the pieces cannot drift apart:
+
+- **A dead stop, then a ramp.** Time runs at six per cent for ninety
+  milliseconds and eases back over the next second. The stop is what sells the
+  hit; the ramp is what stops the return to speed reading as a dropped frame.
+- **The net takes the ball.** Vertices displace along the net's own normal with
+  a Gaussian falloff from where the ball went through, on a decaying ring rather
+  than a single push — a net that bulges and stops looks like rubber sheet.
+- **An expanding ring** at the mouth, fading as it grows so it reads as energy
+  spreading rather than a hoop being pushed down the pitch.
+- **Two waves of particles**: a fast white one, then the team colour behind it.
+  A single burst of one colour reads as a puff; two read as an impact that threw
+  something.
+- **The frame flares and the mouth glow gets out of the way.** The glow is a
+  full-width plane whose job is making a goal visible from the far end, and
+  flaring it does the opposite of what the celebration is for — it becomes a
+  sheet across the mouth that hides the net taking the ball. So it clears.
+- **The crowd goes off**, cameras firing six times as often.
+
+Two details that matter more than they look:
+
+- **Slow motion scales the frame delta, not the step size.** Scaling the step
+  would change what a physics step means, and so how the car handles, which is
+  the one thing slow motion must not touch. The loop feeds fewer fixed steps per
+  second instead.
+- **The celebration animates on real time, not scaled time.** The render handler
+  is given the true frame delta, so the effects play at normal speed while the
+  world crawls — and the adaptive resolution does not mistake slow motion for a
+  slow machine and drop the resolution every time someone scores.
+
+Tested on the parts that break quietly: that the time scale is monotonic and
+back to one before the next kickoff, that the net returns to its exact shape and
+the frame to its exact brightness, and that a goal scored with no arena pointed
+at it does not take the game down — the arena is rebuilt whenever a round
+changes the goals.
+
 ## Sound and effects
 
 **Sound** ([`src/audio/sound.ts`](src/audio/sound.ts)) is synthesised with Web

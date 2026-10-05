@@ -19,6 +19,7 @@ import {
 } from './render/scene';
 import { buildStadium, type Stadium } from './render/stadium';
 import { loadAssets, EMPTY_ASSETS, type GameAssets } from './render/assets';
+import { GoalMoment } from './render/goalMoment';
 import { buildArenaLayout } from './core/arenaLayout';
 import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
 import { ChaseCamera } from './render/chaseCamera';
@@ -80,6 +81,8 @@ export class Game {
   private readonly stadium: Stadium;
   /** Optional art files; empty unless something was dropped in public/assets. */
   private readonly assets: GameAssets;
+  /** The goal celebration, which also owns the slow motion. */
+  private readonly goalMoment: GoalMoment;
   private readonly ball: Ball;
   private readonly pads: BoostPads;
   private readonly carBall = new CarBallInteraction();
@@ -195,10 +198,18 @@ export class Game {
     this.syncHudVisibility();
     this.chase.snapTo(this.player.car.position, this.player.car.forward());
 
+    this.goalMoment = new GoalMoment({
+      scene: this.render.scene,
+      particles: this.particles,
+      stadium: this.stadium,
+    });
+    this.goalMoment.setArena(this.arenaMesh);
+
     this.loop = new Loop(
       { fixed: (dt) => this.fixedStep(dt), render: (dt, alpha) => this.renderFrame(dt, alpha) },
       () => cfg.physics.fixedDt,
       () => cfg.physics.maxStepsPerFrame,
+      () => this.goalMoment.timeScale,
     );
 
     window.addEventListener('config:hot', () => this.syncConfig());
@@ -315,6 +326,7 @@ export class Game {
     this.arena = createArena(this.phys);
     this.arenaMesh = buildArenaMesh();
     this.render.scene.add(this.arenaMesh);
+    this.goalMoment.setArena(this.arenaMesh);
   }
 
   /** Matches the opposition to the round's lineup: count, tiers and roles. */
@@ -346,14 +358,12 @@ export class Game {
     this.matchHud.goal(event);
     const forPlayer = event.team === 0;
     this.sound.goal(forPlayer);
-    this.chase.kick(26);
-    this.particles.burst(this.ball.position, 90, {
-      colour: forPlayer ? GOAL_COLOUR_BLUE : GOAL_COLOUR_ORANGE,
-      speed: 1600,
-      size: 40,
-      life: 1.1,
-      gravity: -500,
-    });
+    this.chase.kick(34);
+    this.goalMoment.trigger(
+      this.ball.position,
+      this.ball.position.x > 0 ? 1 : -1,
+      forPlayer ? GOAL_COLOUR_BLUE : GOAL_COLOUR_ORANGE,
+    );
   }
 
   private onMatchEnd(result: MatchResult): void {
@@ -544,6 +554,8 @@ export class Game {
     // Hand the real frame time to the adaptive resolution. `dt` here is the
     // render delta, which is the frame time whatever the physics did inside it.
     this.render.pace(dt * 1000);
+
+    this.goalMoment.update(dt);
 
     this.stadium.update(dt, {
       blue: this.match.score[0],

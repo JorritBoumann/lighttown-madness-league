@@ -350,7 +350,7 @@ function buildPitch(layout: ArenaLayout): THREE.Mesh {
       // matte floor is the giveaway that a scene is untextured geometry.
       roughness: 0.55,
       metalness: 0.08,
-      envMapIntensity: 0.35,
+      envMapIntensity: cfg.render.pitchEnvIntensity,
     }),
   );
   mesh.rotation.x = -Math.PI / 2;
@@ -393,6 +393,8 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
   );
   back.position.set(goal.x - inward * depth, goal.height / 2, 0);
   back.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
+  // Named so the goal celebration can find it and bulge it.
+  back.name = `net-back-${goal.sign}`;
   group.add(back);
 
   for (const zs of [1, -1]) {
@@ -446,6 +448,8 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
   );
   mouth.position.set(goal.x, goal.height / 2, 0);
   mouth.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
+  mouth.name = `goal-mouth-${goal.sign}`;
+  (mouth.material as THREE.Material).userData.baseOpacity = 0.16;
   group.add(mouth);
 
   // A surround around the mouth, lit in the end's colour.
@@ -460,6 +464,10 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
     roughness: 0.35,
     metalness: 0.45,
   });
+  // The celebration flares these, so it needs to find them and know what to
+  // put them back to.
+  surroundMat.userData.baseEmissive = 0.9;
+  surroundMat.name = `goal-surround-${goal.sign}`;
   const band = 70;
   const surroundX = goal.x + goal.sign * 20;
   // Lintel across the top, then an upright each side of the mouth.

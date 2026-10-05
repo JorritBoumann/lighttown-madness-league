@@ -17,6 +17,15 @@ export class Loop {
     private readonly handlers: LoopHandlers,
     private readonly stepSize: () => number,
     private readonly maxSteps: () => number,
+    /**
+     * How fast the simulation runs against real time. 1 is normal.
+     *
+     * Applied to the frame delta rather than to the step size, so slow motion
+     * feeds the physics fewer steps per second instead of changing what a step
+     * means. Scaling the step would change how the car handles, which is the
+     * one thing slow motion must not touch.
+     */
+    private readonly timeScale: () => number = () => 1,
   ) {}
 
   start(): void {
@@ -38,7 +47,7 @@ export class Loop {
     // Clamp the frame delta so a backgrounded tab does not teleport everything.
     const frameDt = Math.min((now - this.last) / 1000, 0.25);
     this.last = now;
-    this.accumulator += frameDt;
+    this.accumulator += frameDt * this.timeScale();
 
     const dt = this.stepSize();
     let steps = 0;
