@@ -305,6 +305,26 @@ of reach of code written by hand, and the references that look better than this
 use downloaded Rocket League models. Those are Epic's, so they are not an option
 here whatever they look like.
 
+### The arena photographs itself
+
+Every reflective surface — the car's paint and clear coat, the ball's panels,
+the glass, the floor sheen — was reflecting a 64 by 256 gradient drawn by hand,
+which is most of why they read as plastic. The fix was going to be a downloaded
+radiance map, and that was the wrong answer: it would have been an improvement
+and still wrong, putting another building's lights and roofline into our
+paintwork.
+
+So the scene captures itself at boot. Six faces at 256 from the middle of the
+pitch, prefiltered into a radiance map, and the car carries this arena's own
+light banks across its flanks as it turns. Free, no file, no licence, and better
+than a photograph of somewhere else.
+
+It is taken once, before any car or ball exists, which is deliberate twice over:
+those move, so baking them in would smear a stale car across every reflection,
+and capturing with an environment already assigned feeds the map back into
+itself. The arena is not re-captured when a round changes the goal width — the
+goals are a few hundred units of a building tens of thousands across.
+
 ### Art files are optional
 
 There is a loader for a radiance map and a car model, and neither is present.
@@ -322,7 +342,8 @@ every boot of a game that is working perfectly is its own kind of bug.
 A supplied radiance map is prefiltered through `PMREMGenerator` and used for
 reflections only; the night sky behind the stands stays as it is, since an
 indoor radiance map used as a backdrop puts someone else's building behind ours.
-A supplied car is measured and fitted to the hitbox — scaled so its longest
+It is rarely worth supplying, because of the next section. A supplied car is
+measured and fitted to the hitbox — scaled so its longest
 horizontal axis matches the hitbox length, turned to face +x, and dropped so its
 underside sits on the wheel contact line — so a file does not have to be
 prepared to this game's conventions to work.

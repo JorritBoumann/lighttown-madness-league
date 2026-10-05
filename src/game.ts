@@ -10,7 +10,13 @@ import { CarBallInteraction } from './physics/carBall';
 import { Controls } from './input/controls';
 import { emptyInput, type CarInput } from './input/types';
 import { Bot, type BotRole } from './ai/bot';
-import { createRenderer, buildArenaMesh, disposeArenaMesh, type Renderer } from './render/scene';
+import {
+  createRenderer,
+  buildArenaMesh,
+  disposeArenaMesh,
+  captureArenaEnvironment,
+  type Renderer,
+} from './render/scene';
 import { buildStadium, type Stadium } from './render/stadium';
 import { loadAssets, EMPTY_ASSETS, type GameAssets } from './render/assets';
 import { buildArenaLayout } from './core/arenaLayout';
@@ -146,14 +152,20 @@ export class Game {
     this.pads = new BoostPads();
 
     this.render = render;
-    // A supplied radiance map replaces the generated gradient for reflections
-    // only. The night sky behind the stands stays as it is: an indoor radiance
-    // map used as a backdrop puts someone else's building behind ours.
-    if (assets.environment) this.render.scene.environment = assets.environment;
     this.arenaMesh = buildArenaMesh();
     this.render.scene.add(this.arenaMesh);
     this.stadium = buildStadium(buildArenaLayout());
     this.render.scene.add(this.stadium.group);
+
+    // Reflections, from the arena itself. Taken here because the building is
+    // in the scene and no car or ball is yet: those move, and baking one in
+    // would smear a stale car across every reflective surface in the game.
+    //
+    // A supplied radiance map wins if there is one, but there rarely is, and
+    // the arena's own reflections beat a photograph of a different building.
+    const captured = captureArenaEnvironment(this.render, cfg.render.envCaptureHeight);
+    const environment = assets.environment ?? captured;
+    if (environment) this.render.scene.environment = environment;
     this.chase = new ChaseCamera(this.render.camera);
     this.ballMesh = createBallMesh();
     this.padVisuals = createBoostPadVisuals(this.pads.pads);

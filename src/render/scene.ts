@@ -541,3 +541,53 @@ export function disposeArenaMesh(group: THREE.Group): void {
     else if (mat) freeMaterial(mat);
   });
 }
+
+
+/**
+ * Captures the arena's own reflections, once, from the middle of the pitch.
+ *
+ * Better than a photographed radiance map, not just cheaper. Every reflective
+ * surface here — the car's paint and clear coat, the ball's panels, the glass,
+ * the floor sheen — was reflecting a 64x256 gradient drawn by hand, which is
+ * why they all read as plastic. A downloaded map of somebody else's sports hall
+ * would be an improvement and would still be wrong: it would put their lights
+ * and their roofline into our paintwork.
+ *
+ * So the scene photographs itself. Six faces at 256, prefiltered into a
+ * radiance map, and the car now carries this building's light banks across its
+ * flanks as it turns.
+ *
+ * Called once, before any car or ball exists, which is deliberate twice over:
+ * those move, so baking them in would smear a stale car across every
+ * reflection, and capturing with an environment already assigned would feed
+ * the map back into itself.
+ */
+export function captureArenaEnvironment(
+  render: Renderer,
+  height: number,
+): THREE.Texture | null {
+  const { renderer, scene } = render;
+  const previous = scene.environment;
+  // Capture the arena lit by lights and sky alone; an environment already in
+  // place would be reflected into its own replacement.
+  scene.environment = null;
+
+  const target = new THREE.WebGLCubeRenderTarget(cfg.render.envCaptureSize);
+  const camera = new THREE.CubeCamera(10, 40000, target);
+  camera.position.set(0, height, 0);
+
+  try {
+    camera.update(renderer, scene);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const map = pmrem.fromCubemap(target.texture).texture;
+    pmrem.dispose();
+    target.dispose();
+    return map;
+  } catch (error) {
+    // A capture failing should cost reflections, not the game.
+    console.warn('Environment capture failed; keeping the generated sky.', error);
+    scene.environment = previous;
+    target.dispose();
+    return null;
+  }
+}

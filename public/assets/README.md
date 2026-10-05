@@ -9,21 +9,25 @@ Two files are looked for, both named in `src/config.ts` under `assets`:
 
 | File | What it changes |
 | --- | --- |
-| `environment.hdr` | Reflections on every shiny surface: car paint, the clear coat, the ball, the glass, the floor sheen. Replaces a 64x256 generated gradient. |
+| `environment.hdr` | Reflections on every shiny surface. **Rarely worth supplying**: the arena already captures its own, which is better than a photograph of a different building. See below. |
 | `car.glb` | The car body. Fitted to the hitbox on load — measured, scaled, turned to face +x and dropped onto the wheel line — so it does not need preparing to any convention. |
 
 ## Which is worth doing first
 
-`environment.hdr`, by a distance. Every reflective material in the game is
-currently reflecting a hand-drawn gradient, so one file improves the paint, the
-ball, the glass and the floor at once, for no triangles and no art direction
-risk. An **indoor arena or sports hall** radiance map at 2k is the right thing;
-4k is wasted here.
+Neither, probably — and `environment.hdr` least of all now.
 
-The car model is a smaller win than it looks. At chase-camera distance the car
-is around forty pixels tall, where silhouette, paint response and shadow carry
-it — all of which the generated body already does. It matters in the menu orbit
-and in close-ups.
+The arena photographs itself at boot: six faces from the middle of the pitch,
+prefiltered into a radiance map, so every reflective surface carries this
+building's own light banks, crowd and hoardings. A downloaded map of somebody
+else's sports hall would be an improvement on the hand-drawn gradient it
+replaced, and would still be wrong — it would put their lights and their
+roofline into our paintwork. Supply one only if you want a deliberately
+different look; it overrides the capture.
+
+That leaves the car, which is the smaller win of the two. At chase-camera
+distance the car is around forty pixels tall, where silhouette, paint response
+and shadow carry it, and the generated body already does those. It matters in
+the menu orbit and in close-ups.
 
 ## If you generate the car
 

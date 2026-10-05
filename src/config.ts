@@ -542,6 +542,12 @@ export const config = {
     exposure: 1.02,
     /** How much the sky gradient lights the scene through reflections. */
     environmentIntensity: 0.22,
+    /** Face size for the arena's self-captured reflection map. 256 is plenty:
+     *  it is blurred into a radiance map immediately afterwards. */
+    envCaptureSize: 256,
+    /** How high above the pitch the capture is taken from. */
+    envCaptureHeight: 500,
+
     /**
      * Adaptive resolution. The renderer holds the frame rate by moving the
      * pixel ratio between `scaleFloor` and the display's own, which is why
