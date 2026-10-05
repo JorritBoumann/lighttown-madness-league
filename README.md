@@ -106,6 +106,42 @@ Two interchangeable ways to change any of it, both live:
 The throttle and steering curves are lookup tables rather than single numbers,
 so they live in the file rather than on a slider.
 
+## The camera on a wall
+
+Driving up a wall used to put the view behind the wall, looking in through it.
+The camera built its position from a world-horizontal offset and a world-up
+lift, which is right on the floor and wrong everywhere else: on the +z wall the
+car sits at z 4044 and the camera asked for 4450, with the wall at 4096.
+
+It now works in the frame of the surface the car is on, and three separate
+things had to change before the view was actually usable.
+
+- **Where it stands follows the surface completely.** The first attempt eased
+  only part of the way onto the wall normal, so a car on a vertical wall still
+  got most of its lift from world up — which slides the camera *along* the wall
+  rather than off it, and leaves it clamped against the glass.
+- **The horizon rolls only part of the way.** That is a different quantity, and
+  conflating the two was the bug above. Rolled fully onto a wall the world
+  turns ninety degrees and nothing is readable.
+- **Ball cam gives way to the follow camera as the surface tilts.** Ball cam
+  puts the camera on the line from the ball through the car, so the car is
+  always between the two. On a wall that line runs into the wall: there is no
+  room behind the car. Both the position and the look target blend to the
+  follow camera's, so the car stays the subject and the ball becomes context.
+  Aiming at a point most of the way to the ball from a wall swings the view out
+  over the pitch until the car is behind the camera.
+
+Behind all that, the camera is kept inside the arena as a backstop, corner cuts
+included — easing means it is briefly still working off the old surface during
+a transition, and a seam can push it through a wall for a frame or two, which is
+long enough to see the outside of the building.
+
+Tested on walls, the ceiling and a cut corner, that it stands off rather than
+pressing against the glass, that the car stays in shot, and — the one that
+matters most — that passing no surface at all leaves the floor behaviour
+identical to the frame, since that is where the camera spends nearly all its
+time.
+
 ## Walls and the ceiling
 
 Driving up a wall and carrying on onto the ceiling both work, and both were

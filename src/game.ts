@@ -647,6 +647,7 @@ export class Game {
         player.car.velocity,
         player.car.forward(),
         this.ballMesh.position,
+        { grounded: player.car.grounded, normal: player.car.groundNormal },
       );
     }
 

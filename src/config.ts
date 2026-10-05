@@ -687,6 +687,25 @@ export const config = {
   },
 
   camera: {
+    /**
+     * How far the horizon rolls onto the surface the car is driving on.
+     *
+     * Only the roll: where the camera stands relative to the surface follows
+     * it completely, or on a wall the camera gets its lift from world up and
+     * ends up pressed against the glass. 0 keeps the horizon level with the
+     * world, 1 turns it ninety degrees on a wall and nothing is readable.
+     */
+    surfaceRoll: 0.55,
+    /** How quickly the camera settles onto a new surface, per second. Fast
+     *  enough to keep up with a car crossing the floor-wall seam at speed. */
+    surfaceEase: 9,
+    /** How far from the car towards the ball the ball cam looks. */
+    ballBias: 0.75,
+    /** How far the look target is lifted off a wall, so the car sits in the
+     *  lower middle of the frame with the pitch beyond it. */
+    wallLookLift: 160,
+    /** How far inside the walls the camera is kept, in uu. */
+    wallMargin: 120,
     /** The slow orbit behind the title and summary screens. */
     menuOrbitSpeed: 0.055,
     /** Inside the bowl, not outside it: the walls are solid, so a camera

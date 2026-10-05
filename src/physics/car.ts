@@ -112,7 +112,14 @@ export class Car {
   groundDistance = Infinity;
 
   private readonly wheels: Wheel[];
-  private groundNormal = new THREE.Vector3(0, 1, 0);
+  /**
+   * The surface the car is standing on, pointing away from it.
+   *
+   * Public because the camera needs it: a chase camera that works purely in
+   * world-horizontal terms puts itself through the wall the moment you drive
+   * up one.
+   */
+  readonly groundNormal = new THREE.Vector3(0, 1, 0);
   private beachNormal = new THREE.Vector3(0, 1, 0);
   private airTime = 0;
   private jumpsUsed = 0;
