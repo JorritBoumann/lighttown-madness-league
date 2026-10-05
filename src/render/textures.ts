@@ -118,7 +118,7 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // lights are pointed at.
   const stripes = 16;
   for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? '#2c6a33' : '#24592b';
+    ctx.fillStyle = i % 2 ? '#3d8a3f' : '#2f7133';
     ctx.fillRect((i / stripes) * W, 0, W / stripes + 1, H);
   }
 
@@ -152,9 +152,9 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // The white centre is gone: the floodlights light the middle now, and
   // painting the highlight into the albedo as well made it milky.
   const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.66);
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(0.55, 'rgba(0,0,0,0.1)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.34)');
+  vg.addColorStop(0, 'rgba(255,245,220,0.05)');
+  vg.addColorStop(0.55, 'rgba(0,0,0,0.06)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.26)');
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, W, H);
 
@@ -162,10 +162,12 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // the cue that tells you which way you are attacking at a glance.
   const mouth = goalWidth / 2;
   for (const [sign, tint] of [
-    // Back to the teams' own colours: on grass both read clearly, which they
-    // did not on a blue floor — a blue tint over blue is almost no tint.
-    [1, 'rgba(255,112,67,0.30)'],
-    [-1, 'rgba(66,145,245,0.30)'],
+    // Faint. At thirty percent of a saturated blue these stopped reading as a
+    // tint and became paint: the kickoff spot sits inside the blue ellipse, so
+    // the grass under the car came out teal and the whole pitch looked
+    // mis-lit. The cue only has to be strong enough to read at a glance.
+    [1, 'rgba(255,138,96,0.12)'],
+    [-1, 'rgba(96,160,235,0.12)'],
   ] as [number, string][]) {
     const depth = len(1700);
     ctx.fillStyle = tint;
@@ -723,22 +725,68 @@ export function carNormalMap(): THREE.Texture {
  * directionality is most of what tells you it is grass.
  */
 export function grassNormalMap(): THREE.Texture {
-  return normalMapFromHeight(256, 2.6, (ctx, s) => {
-    ctx.fillStyle = '#6b6b6b';
+  // Three scales in one tile, which is the whole trick.
+  //
+  // A single scale of detail does not work on a surface you see from a car's
+  // height: fine blades alone are sub-pixel at any distance and average back to
+  // a flat slab, and blades coarse enough to see up close are gravel static
+  // from further away. So the tile carries soft undulation, clumping, and
+  // blades together, and whichever one the viewing distance can resolve is the
+  // one that shows.
+  return normalMapFromHeight(256, 1.8, (ctx, s) => {
+    ctx.fillStyle = '#808080';
     ctx.fillRect(0, 0, s, s);
-    ctx.lineCap = 'round';
-    for (let i = 0; i < 2600; i++) {
+
+    // Undulation: the ground itself is not flat.
+    for (let i = 0; i < 26; i++) {
       const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
       const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
       const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
       const x = r0 * s;
       const y = r1 * s;
-      // Mostly upright, leaning a little, the way a mown pitch lies.
-      const lean = (r2 - 0.5) * 0.9;
-      const len = s * (0.016 + r2 * 0.026);
-      const bright = Math.round(96 + r2 * 120);
+      const r = s * (0.12 + r2 * 0.22);
+      const blob = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const v = r2 > 0.5 ? 150 : 108;
+      blob.addColorStop(0, `rgba(${v},${v},${v},0.5)`);
+      blob.addColorStop(1, 'rgba(128,128,128,0)');
+      ctx.fillStyle = blob;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Clumps: where the grass grows thicker, at about a car's width.
+    for (let i = 0; i < 150; i++) {
+      const r0 = Math.abs((Math.sin(i * 5.17) * 9731.3) % 1);
+      const r1 = Math.abs((Math.sin(i * 23.9) * 3312.7) % 1);
+      const r2 = Math.abs((Math.sin(i * 61.3) * 5521.9) % 1);
+      const x = r0 * s;
+      const y = r1 * s;
+      const r = s * (0.02 + r2 * 0.045);
+      const clump = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const v = r2 > 0.5 ? 168 : 96;
+      clump.addColorStop(0, `rgba(${v},${v},${v},0.55)`);
+      clump.addColorStop(1, 'rgba(128,128,128,0)');
+      ctx.fillStyle = clump;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Blades, lying one way. Grass is not isotropic, and that directionality is
+    // most of what reads as grass when the light grazes across it.
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 1800; i++) {
+      const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
+      const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
+      const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
+      const x = r0 * s;
+      const y = r1 * s;
+      const lean = (r2 - 0.5) * 0.8;
+      const len = s * (0.014 + r2 * 0.02);
+      const bright = Math.round(104 + r2 * 76);
       ctx.strokeStyle = `rgb(${bright},${bright},${bright})`;
-      ctx.lineWidth = s / 230;
+      ctx.lineWidth = s / 260;
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x + lean * len, y - len);
@@ -811,23 +859,49 @@ export function fasciaTexture(): THREE.Texture {
   const H = 128;
   const [el, ctx] = canvas(W, H);
 
-  ctx.fillStyle = '#7e8a99';
+  // Dark board, bright content — the same decision as the hoardings, and for
+  // the same reason. The first version alternated saturated blue, white and
+  // orange panels across the whole band, and six repeats of that round the bowl
+  // read as a barber pole: the brightest, busiest thing in the arena, sitting
+  // where a real one has a quiet ribbon of signage.
+  ctx.fillStyle = '#121824';
   ctx.fillRect(0, 0, W, H);
 
-  // Lit panels, alternating house colours with dark gaps between.
-  const panels = 12;
-  const colours = ['#35719f', '#dfe6ee', '#c2622f', '#dfe6ee'];
+  const panels = 10;
   for (let i = 0; i < panels; i++) {
     const x = (i / panels) * W;
     const w = W / panels;
-    ctx.fillStyle = colours[i % colours.length]!;
-    ctx.fillRect(x + w * 0.06, H * 0.18, w * 0.88, H * 0.64);
+    // Mostly dark, with the house colours appearing as an accent rather than
+    // as the panel itself.
+    const accent = i % 5 === 1 ? '#2f6a99' : i % 5 === 3 ? '#a8542a' : null;
+    ctx.fillStyle = '#1b2433';
+    ctx.fillRect(x + w * 0.04, H * 0.2, w * 0.92, H * 0.6);
+    if (accent) {
+      ctx.fillStyle = accent;
+      ctx.fillRect(x + w * 0.04, H * 0.2, w * 0.92, H * 0.6);
+    }
+
+    // A wordless mark, bright enough to carry at distance.
+    ctx.fillStyle = 'rgba(205,228,255,0.8)';
+    const cy = H * 0.5;
+    if (i % 3 === 0) {
+      ctx.fillRect(x + w * 0.2, cy - H * 0.07, w * 0.6, H * 0.08);
+    } else if (i % 3 === 1) {
+      ctx.beginPath();
+      ctx.arc(x + w * 0.5, cy, H * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      for (let k = 0; k < 3; k++) {
+        ctx.fillRect(x + w * (0.28 + k * 0.16), cy - H * 0.14, w * 0.07, H * 0.28);
+      }
+    }
   }
 
-  // A lit pipe along the top and bottom edge, which is what reads at distance.
-  ctx.fillStyle = 'rgba(190,215,255,0.9)';
-  ctx.fillRect(0, 0, W, H * 0.1);
-  ctx.fillRect(0, H * 0.9, W, H * 0.1);
+  // A lit pipe along the top and bottom edge, which is what reads at distance
+  // and what ties the band to the LED ribbon lower down.
+  ctx.fillStyle = 'rgba(190,220,255,0.95)';
+  ctx.fillRect(0, 0, W, H * 0.09);
+  ctx.fillRect(0, H * 0.91, W, H * 0.09);
 
   const tex = finish(el, true);
   tex.repeat.set(6, 1);

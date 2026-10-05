@@ -251,8 +251,8 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   // --- fascia and banners ------------------------------------------------
   const fasciaMat = new THREE.MeshStandardMaterial({
     map: fasciaTexture(),
-    emissive: 0x3d63a8,
-    emissiveIntensity: 0.85,
+    emissive: 0x2a4472,
+    emissiveIntensity: 0.4,
     roughness: 0.5,
     side: THREE.DoubleSide,
   });
@@ -390,27 +390,28 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   group.add(new THREE.Mesh(mergeGeometries(stripParts, false), warmStripMat));
   for (const geo of stripParts) geo.dispose();
 
-  // And a run down each corner, tying the roofline to the bowl. In a real
-  // arena these are the structural ribs picked out in light; here they are the
-  // thing that stops the upper half of the frame being an unbroken dark mass.
-  const ribParts: THREE.BufferGeometry[] = [];
+  // A second warm run lower down, at the back of the lower deck. Two lines of
+  // light at different heights are what give the bowl depth; one leaves the
+  // whole upper half of the frame an unbroken dark mass.
+  //
+  // The first attempt at this put vertical ribs down the four cut corners and
+  // they read as yellow columns standing in the stands — a thing nobody would
+  // build. Light in an arena follows the bowl round, it does not stand up in it.
+  const ledLowParts: THREE.BufferGeometry[] = [];
   for (const edge of edges) {
-    if (edge.length > 2000) continue; // the four cut corners only
-    const top = roofY - 150;
-    const foot = lower.base + lower.rows * lower.rise + s.fasciaHeight;
-    const rib = new THREE.BoxGeometry(edge.length * 0.5, top - foot, 30);
-    const angle = Math.atan2(edge.dir.y, edge.dir.x);
-    rib.rotateY(-angle);
-    rib.rotateX(0);
-    rib.translate(
-      edge.mid.x + edge.normal.x * (lower.inset + lower.rows * lower.tread),
-      (top + foot) / 2,
-      edge.mid.y + edge.normal.y * (lower.inset + lower.rows * lower.tread),
+    ledLowParts.push(
+      edgeSlab(
+        edge,
+        lower.inset + lower.rows * lower.tread - 40,
+        26,
+        18,
+        lower.base + lower.rows * lower.rise + 30,
+        60,
+      ),
     );
-    ribParts.push(rib);
   }
-  group.add(new THREE.Mesh(mergeGeometries(ribParts, false), warmStripMat));
-  for (const geo of ribParts) geo.dispose();
+  group.add(new THREE.Mesh(mergeGeometries(ledLowParts, false), warmStripMat));
+  for (const geo of ledLowParts) geo.dispose();
 
   // --- screens -----------------------------------------------------------
   // A scoreline hanging at each end. A stadium has screens, and this one can

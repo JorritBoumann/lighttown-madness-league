@@ -75,7 +75,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   // This is the balance the daylight version had backwards. A hemisphere at
   // 1.25 lights concrete and grass alike, and a building with no shadow in it
   // reads as a diagram rather than a place.
-  const hemi = new THREE.HemisphereLight(0x6e5f9c, 0x2b3326, cfg.render.hemiIntensity);
+  const hemi = new THREE.HemisphereLight(0x5c5590, 0x33402c, cfg.render.hemiIntensity);
   scene.add(hemi);
 
   // Cool counter-fill from the opposite side, which is what keeps the shadow
@@ -405,10 +405,10 @@ function buildPitch(layout: ArenaLayout): THREE.Mesh {
         // isotropic, and grass is the opposite: it lies one way and catches
         // the light along its length, which is most of what reads as grass.
         const blades = grassNormalMap();
-        blades.repeat.set(130, 104);
+        blades.repeat.set(70, 56);
         return blades;
       })(),
-      normalScale: new THREE.Vector2(0.75, 0.75),
+      normalScale: new THREE.Vector2(0.5, 0.5),
       // Nearly matte. Grass is not shiny, and the sheen that used to be here
       // spread a broad specular wash across the whole pitch the moment the key
       // light got strong — which is what made it look milky rather than green.

@@ -562,7 +562,7 @@ export const config = {
      * stands. It also does real work for the driving, because it draws the
      * line the car is about to leave when it climbs the wall.
      */
-    ledHeight: 46,
+    ledHeight: 20,
     /** How far outside the wall it sits, so it cannot be driven into. */
     ledInset: 26,
     /** Warm strips along the inner lip of the roof, and down the corners. */
@@ -686,7 +686,7 @@ export const config = {
      */
     environmentIntensity: 0.38,
     /** The same correction for the pitch, which reflects more than most. */
-    pitchEnvIntensity: 0.15,
+    pitchEnvIntensity: 0.06,
     /** Face size for the arena's self-captured reflection map. 256 is plenty:
      *  it is blurred into a radiance map immediately afterwards. */
     envCaptureSize: 256,
