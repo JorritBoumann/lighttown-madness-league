@@ -55,10 +55,6 @@ export default defineConfig(({ isSsrBuild }) => ({
     // build and means nothing. Set above it, so it means something again.
     chunkSizeWarningLimit: 600,
     rolldownOptions: {
-      // Two pages: the game, and the networked client. This build uses
-      // rolldown, so `rollupOptions` here is read by nobody and the second page
-      // simply does not get built.
-      input: { main: 'index.html', net: 'net.html' },
       output: {
         // Three and Rapier change far less often than the game does, so they
         // get their own chunks and stay in the browser cache across deploys.

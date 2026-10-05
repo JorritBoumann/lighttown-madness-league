@@ -124,15 +124,7 @@ export class GameServer {
     });
     this.sim.resetKickoff();
 
-    this.pendingRound = {
-      type: 'round',
-      index: spec.index,
-      label: spec.label,
-      isBoss: spec.isBoss,
-      // The numbers in force, not the names they came from.
-      config: { ...this.roundOverrides.effective(), ...this.runOverrides.effective() },
-      rebuildArena: rebuild,
-    };
+    this.pendingRound = this.roundMessage(rebuild);
     this.runDirty = true;
   }
 
@@ -145,14 +137,24 @@ export class GameServer {
 
   /** The round message again, for a client that just joined. */
   currentRound(): RoundMessage | null {
-    if (!this.spec) return null;
+    return this.spec ? this.roundMessage(this.rebuiltArena) : null;
+  }
+
+  private roundMessage(rebuild: boolean): RoundMessage {
+    const spec = this.spec!;
     return {
       type: 'round',
-      index: this.spec.index,
-      label: this.spec.label,
-      isBoss: this.spec.isBoss,
+      index: spec.index,
+      label: spec.label,
+      isBoss: spec.isBoss,
+      // The numbers in force, not the names they came from.
       config: { ...this.roundOverrides.effective(), ...this.runOverrides.effective() },
-      rebuildArena: this.rebuiltArena,
+      rebuildArena: rebuild,
+      modifierIds: spec.modifiers.map((m) => m.id),
+      bossId: spec.boss?.id ?? null,
+      rules: spec.rules,
+      opponents: spec.lineup.length,
+      tier: spec.tier,
     };
   }
 
@@ -169,8 +171,10 @@ export class GameServer {
       phase: this.run.phase,
       round: this.run.round,
       roundsCleared: this.run.stats.roundsCleared,
-      offer: this.run.offer.map((u) => u.name),
-      taken: this.run.upgrades.map((u) => u.name),
+      offer: this.run.offer.map((u) => u.id),
+      taken: this.run.upgrades.map((u) => u.id),
+      goalsFor: this.run.stats.goalsFor,
+      goalsAgainst: this.run.stats.goalsAgainst,
       chooser: this.run.phase === 'between' ? this.hostId() : null,
     };
   }
@@ -277,6 +281,7 @@ export class GameServer {
       ball: bodyState(this.sim.ball.body),
       clock: this.sim.match.clock,
       score: [...this.sim.match.score] as [number, number],
+      phase: this.sim.match.phase,
     };
   }
 

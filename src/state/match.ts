@@ -96,6 +96,21 @@ export function defaultRules(): MatchRules {
 export class Match {
   readonly rules: MatchRules;
   phase: MatchPhase = 'countdown';
+
+  /**
+   * Copies in a clock, score and phase decided somewhere else.
+   *
+   * For a client of a server: the match is not being played here, so nothing
+   * would advance and the HUD would sit on a countdown that never finishes.
+   * This is display only and deliberately does not touch the rules — a client
+   * showing a score is not a client deciding one.
+   */
+  mirror(state: { clock: number; score: readonly [number, number]; phase: MatchPhase }): void {
+    this.clock = state.clock;
+    this.score[0] = state.score[0];
+    this.score[1] = state.score[1];
+    this.phase = state.phase;
+  }
   /** Seconds remaining. Counts up once sudden death starts. */
   clock: number;
   readonly score: [number, number] = [0, 0];

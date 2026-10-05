@@ -5,7 +5,11 @@ const ui = document.getElementById('ui') as HTMLElement;
 const boot = document.getElementById('boot');
 
 try {
-  const game = await Game.create(canvas, ui);
+  // `?server=ws://host:port` joins a match instead of playing solo. One game
+  // either way: the difference is who owns the run, and nothing the player
+  // looks at knows which it is.
+  const server = new URLSearchParams(location.search).get('server') ?? undefined;
+  const game = await Game.create(canvas, ui, server);
   game.start();
   boot?.classList.add('gone');
 

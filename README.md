@@ -1099,13 +1099,18 @@ npm run server          # ws://localhost:8080, 2 seats, 1 bot
 PORT=9000 SEATS=4 BOTS=0 npm run server
 ```
 
-Then open `net.html` against it:
+Then point the game at it:
 
 ```
-http://127.0.0.1:5173/net.html?server=ws://localhost:8080
+http://127.0.0.1:5173/?server=ws://localhost:8080
 ```
 
-Open it twice and the two browsers play the same gauntlet run: same round, same
+There is one game, not two. Without `?server` it owns its own run and plays
+solo exactly as before; with it, the server owns the run and the same
+simulation becomes a prediction. The renderer, the HUD, the camera and the car
+are not told which of the two is happening.
+
+Open that twice and the two browsers play the same gauntlet run: same round, same
 score, a car each, and the opposition the round called for. The run lives on the
 server, because a run is a sequence of decisions — which round, which modifiers,
 which upgrades — and two clients deciding those separately is two different

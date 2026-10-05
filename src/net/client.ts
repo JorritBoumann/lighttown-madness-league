@@ -72,11 +72,14 @@ export class NetClient {
   private lastCarCount = 0;
   private lastClock = 0;
   private lastScore: [number, number] = [0, 0];
+  private lastPhase = 'countdown';
   /** The round in force, and the run around it. Null until the server says. */
   round: RoundMessage | null = null;
   run: RunMessage | null = null;
   /** Fired when a new round arrives, so the client can rebuild to match. */
   onRound: ((round: RoundMessage) => void) | null = null;
+  /** Fired when the run's state changes, so the client can mirror it. */
+  onRun: ((run: RunMessage) => void) | null = null;
   private connected = false;
 
   constructor(private readonly url: string) {}
@@ -108,6 +111,9 @@ export class NetClient {
   get score(): [number, number] {
     return this.lastScore;
   }
+  get phase(): string {
+    return this.lastPhase;
+  }
 
   /** Takes an offered upgrade. The server ignores it unless we are the host. */
   choose(index: number): void {
@@ -136,12 +142,14 @@ export class NetClient {
     }
     if (message.type === 'run') {
       this.run = message;
+      this.onRun?.(message);
       return;
     }
     this.latest = message;
     this.lastCarCount = message.cars.length;
     this.lastClock = message.clock;
     this.lastScore = message.score;
+    this.lastPhase = message.phase;
   }
 
   disconnect(): void {

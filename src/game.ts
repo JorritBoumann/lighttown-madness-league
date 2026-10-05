@@ -7,6 +7,12 @@ import { Ball } from './physics/ball';
 import { Car } from './physics/car';
 import { BoostPads } from './physics/boostPads';
 import { Simulation, type SimCar } from './sim/simulation';
+import { NetClient } from './net/client';
+import { MODIFIERS } from './state/modifiers';
+import { BOSSES } from './state/bosses';
+import { UPGRADES } from './state/upgrades';
+import type { RoundMessage, RunMessage } from './server/protocol';
+import type { MatchPhase } from './state/match';
 import { Controls } from './input/controls';
 import { emptyInput, type CarInput } from './input/types';
 import { Bot, type BotRole } from './ai/bot';
@@ -133,6 +139,18 @@ export class Game {
    * people's input arriving for several cars.
    */
   private readonly playerInput = new Map<number, CarInput>();
+  /**
+   * Set when this game is a client of a server rather than its own authority.
+   *
+   * Solo play is unchanged: the game owns its run and steps its own
+   * simulation. Joined to a server, the same simulation becomes a prediction
+   * and the run arrives over the wire. Everything between those two — the
+   * renderer, the HUD, the camera, the car — does not know the difference,
+   * which is the point of having moved the simulation out in the first place.
+   */
+  private net: NetClient | null = null;
+  /** The round's tuning when a server is dictating it. */
+  private readonly remoteConfig = new ConfigOverrides();
   /** Index 0 is always the player. */
   private get player(): CarEntry {
     return this.entries[0]!;
@@ -288,18 +306,122 @@ export class Game {
     window.addEventListener('config:hot', () => this.syncConfig());
   }
 
-  static async create(canvas: HTMLCanvasElement, ui: HTMLElement): Promise<Game> {
+  static async create(
+    canvas: HTMLCanvasElement,
+    ui: HTMLElement,
+    serverUrl?: string,
+  ): Promise<Game> {
     await initPhysics();
     // The renderer is needed to prefilter a radiance map, and nothing can be
     // built before the physics is up, so assets load between the two. Missing
     // files are the normal case and are not an error: see render/assets.ts.
     const probe = createRenderer(canvas);
     const assets = await loadAssets(probe.renderer);
-    return new Game(ui, probe, assets);
+    const game = new Game(ui, probe, assets);
+    if (serverUrl) game.join(serverUrl);
+    return game;
   }
 
   start(): void {
     this.loop.start();
+  }
+
+  // --- joining a server ----------------------------------------------------
+
+  /**
+   * Hands authority over the run to a server.
+   *
+   * Solo, this game decides what happens and the screen shows it. Joined, the
+   * server decides and this game predicts: the same simulation, stepped on the
+   * same input, corrected whenever the server's answer arrives. The HUD, the
+   * camera and the car are told nothing about which of the two is happening.
+   */
+  private join(url: string): void {
+    const net = new NetClient(url);
+    this.net = net;
+    net.onRound = (round) => this.applyRemoteRound(round);
+    net.onRun = (run) => this.applyRemoteRun(run);
+    net.connect(() => {
+      // Straight into play: a server decides when a round starts, so there is
+      // nothing for a title screen to offer.
+      this.screen = 'playing';
+      this.freePlay = false;
+      this.shell.hide();
+      this.syncHudVisibility();
+    });
+  }
+
+  /** The server's round: its tuning, its arena, its label. */
+  private applyRemoteRound(round: RoundMessage): void {
+
+    this.remoteConfig.revert();
+    this.remoteConfig.apply(round.config);
+
+    if (round.rebuildArena) this.rebuildArena();
+    this.sim.syncConfig();
+
+    // Rebuilt from ids rather than sent whole: modifiers carry functions, which
+    // JSON cannot hold, and the client must not run them in any case — the
+    // config above already says what they did.
+    const modifiers = round.modifierIds
+      .map((id) => MODIFIERS.find((m) => m.id === id))
+      .filter((m): m is (typeof MODIFIERS)[number] => m !== undefined);
+    const boss = round.bossId ? (BOSSES.find((b) => b.id === round.bossId) ?? null) : null;
+    const spec = {
+      index: round.index,
+      isBoss: round.isBoss,
+      boss,
+      lineup: [],
+      tier: round.tier,
+      opponents: round.opponents,
+      modifiers,
+      rules: round.rules,
+      label: round.label,
+    };
+
+    this.run.spec = spec;
+    this.run.phase = 'round';
+    this.runHud.roundStart(spec);
+    this.matchHud.reset();
+    this.setUpKickoff();
+  }
+
+  /**
+   * Builds cars until there are as many here as the server is describing.
+   *
+   * The count is the server's to decide — it created them — so this follows
+   * rather than assumes. Teams are taken from the seat count the server was
+   * started with, which is the one thing a client still has to be told.
+   */
+  private matchRemoteCars(count: number): void {
+    while (this.entries.length < count) {
+      const index = this.entries.length;
+      const mine = index === this.net?.carIndex;
+      this.dressCar(this.sim.addCar(mine ? 0 : 1, index, null), mine);
+    }
+  }
+
+  /** The server's run state, mirrored into the one the HUD already reads. */
+  private applyRemoteRun(message: RunMessage): void {
+    const run = this.run;
+    const byId = (id: string): (typeof UPGRADES)[number] | undefined =>
+      UPGRADES.find((u) => u.id === id);
+
+    run.phase = message.phase;
+    run.offer = message.offer.map(byId).filter((u): u is (typeof UPGRADES)[number] => !!u);
+    run.upgrades.length = 0;
+    for (const id of message.taken) {
+      const upgrade = byId(id);
+      if (upgrade) run.upgrades.push(upgrade);
+    }
+    run.stats.roundsCleared = message.roundsCleared;
+    run.stats.goalsFor = message.goalsFor;
+    run.stats.goalsAgainst = message.goalsAgainst;
+    this.runHud.showOwned(run.upgrades);
+
+    if (message.phase === 'between' && run.offer.length > 0) {
+      this.runHud.offerUpgrades(run.spec ?? this.run.spec!, run.offer);
+    }
   }
 
   // --- setup -------------------------------------------------------------
@@ -507,18 +629,39 @@ export class Game {
     const input = this.inputOverride
       ? { ...emptyInput(), ...this.inputOverride }
       : this.controls.read();
-    this.playerInput.set(0, input);
+    this.playerInput.set(this.net?.carIndex ?? 0, input);
     if (!driving && !this.inputOverride) {
       // Keeps the jump latch from banking a press for after the countdown.
       this.controls.read();
     }
 
+    // Joined to a server, the local simulation is a prediction: the same step
+    // on the same input, then corrected whenever the server's answer lands.
+    // The server owns the clock and the round, so neither is run here.
+    const net = this.net;
+    if (net) {
+      // Driven by the snapshots, not by the round message: the round arrives
+      // first, before any snapshot has said how many cars there are, so doing
+      // this there left the opposition missing from the client entirely.
+      this.matchRemoteCars(net.snapshotCarCount);
+      net.send(input);
+    }
     const events = this.sim.step(dt, {
-      driving,
-      frozen,
-      clock: live && !this.freePlay,
+      driving: net ? net.isConnected : driving,
+      frozen: net ? false : frozen,
+      clock: net ? false : live && !this.freePlay,
       inputs: this.playerInput,
     });
+    if (net) {
+      net.reconcile(this.sim);
+      // The match is being played on the server, so the one here exists only to
+      // be shown. Without this the HUD sits on a countdown that never ends.
+      this.match.mirror({
+        clock: net.clock,
+        score: net.score,
+        phase: net.phase as MatchPhase,
+      });
+    }
 
     for (const picked of events.padPickups) {
       if (picked.car === this.player.car) this.run.stats.driving.pads++;
@@ -1053,6 +1196,12 @@ export class Game {
 
   /** Takes the nth offered upgrade. Exposed for the console and for tests. */
   pickUpgrade(index: number): void {
+    // Joined to a server, the pick is a request: the server decides whether
+    // this client is the one allowed to make it, and tells everyone the result.
+    if (this.net) {
+      this.net.choose(index);
+      return;
+    }
     this.run.choose(index);
   }
 

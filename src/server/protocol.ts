@@ -1,4 +1,5 @@
 import type { CarInput } from '../input/types';
+import type { MatchRules } from '../state/match';
 
 /**
  * What the wire carries.
@@ -56,6 +57,8 @@ export interface SnapshotMessage {
   /** Match clock and score, so a client needs no second channel for the HUD. */
   clock: number;
   score: [number, number];
+  /** So a client can show a countdown or a goal pause rather than guessing. */
+  phase: string;
 }
 
 /**
@@ -76,6 +79,21 @@ export interface RoundMessage {
   config: Record<string, number>;
   /** True when goal dimensions changed and the arena must be rebuilt. */
   rebuildArena: boolean;
+  /**
+   * Ids, not objects.
+   *
+   * Modifiers and bosses are static data compiled into both ends, so an id is
+   * enough for a client to look up the real thing and show its name, its
+   * description and a boss's brief. Sending the objects would mean sending
+   * functions, which JSON cannot carry — and the client must not run them
+   * anyway, because `config` above already says what they did.
+   */
+  modifierIds: string[];
+  bossId: string | null;
+  rules: MatchRules;
+  opponents: number;
+  /** Highest opponent tier on the field, which the round card shows. */
+  tier: number;
 }
 
 /** Where the run is, and what is on offer between rounds. */
@@ -84,10 +102,12 @@ export interface RunMessage {
   phase: 'idle' | 'round' | 'between' | 'over';
   round: number;
   roundsCleared: number;
-  /** Upgrade names on offer, when the run is between rounds. */
+  /** Upgrade ids on offer, when the run is between rounds. */
   offer: string[];
-  /** Upgrades already taken. */
+  /** Upgrade ids already taken, in the order they were taken. */
   taken: string[];
+  goalsFor: number;
+  goalsAgainst: number;
   /** Which client may choose. Null when nobody needs to. */
   chooser: number | null;
 }
