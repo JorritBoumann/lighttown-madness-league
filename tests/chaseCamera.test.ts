@@ -158,7 +158,12 @@ describe('ball cam while turning', () => {
   /** A car driving a steady circle with the ball parked off to one side. */
   function circle(follow: number, radius = 700): { offNose: number; ballSeen: number } {
     const restore = cfg.camera.ballCamFollow;
+    const restoreAway = cfg.camera.ballCamAway;
     cfg.camera.ballCamFollow = follow;
+    // The away lean is held off here so this measures the turning lean on its
+    // own. A car circling a ball spends part of every lap pointing away from
+    // it, so leaving both on would mean neither number says what it claims.
+    cfg.camera.ballCamAway = 0;
     const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1.6, 10, 40000);
     const chase = new ChaseCamera(camera);
     const ball = { x: -1800, y: 95, z: 1800 };
@@ -193,6 +198,7 @@ describe('ball cam while turning', () => {
       }
     }
     cfg.camera.ballCamFollow = restore;
+    cfg.camera.ballCamAway = restoreAway;
     angles.sort((a, b) => a - b);
     return {
       offNose: Math.round(angles[Math.floor(angles.length / 2)]!),
@@ -237,5 +243,158 @@ describe('ball cam while turning', () => {
     const b = new THREE.Vector3(ball.x, ball.y, ball.z).project(camera);
     expect(Math.abs(b.x)).toBeLessThan(1);
     expect(Math.abs(b.y)).toBeLessThan(1);
+  });
+});
+
+describe('ball cam when the car drives away from the ball', () => {
+  /**
+   * Ball cam's worst moment, and the one the camera used to hand you whole:
+   * the camera sits on the line from the ball through the car, so a car
+   * driving away from the ball is driving straight at the camera. You watch
+   * your own bonnet come at you and the steering reads mirrored.
+   *
+   * Measured as the angle between where the camera looks and where the nose
+   * points, flattened. Zero is behind the car; 180 is nose-on.
+   */
+  function driveAway(awayLean: number, speed = 1200): number {
+    const restore = cfg.camera.ballCamAway;
+    cfg.camera.ballCamAway = awayLean;
+    const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1.6, 10, 40000);
+    const chase = new ChaseCamera(camera);
+    const ball = { x: -2600, y: 95, z: 0 };
+    const nose = new THREE.Vector3(1, 0, 0);
+    let x = -1200;
+    chase.snapTo({ x, y: 40, z: 0 }, nose);
+
+    const angles: number[] = [];
+    for (let t = 0; t < 4; t += 1 / 60) {
+      x += speed / 60;
+      chase.update(1 / 60, { x, y: 40, z: 0 }, { x: speed, y: 0, z: 0 }, nose, ball, {
+        grounded: true,
+        normal: new THREE.Vector3(0, 1, 0),
+      });
+      if (t > 2) {
+        camera.updateMatrixWorld(true);
+        const view = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        view.y = 0;
+        view.normalize();
+        angles.push((Math.acos(Math.max(-1, Math.min(1, view.dot(nose)))) * 180) / Math.PI);
+      }
+    }
+    cfg.camera.ballCamAway = restore;
+    angles.sort((a, b) => a - b);
+    return Math.round(angles[Math.floor(angles.length / 2)]!);
+  }
+
+  it('puts the nose back down the screen', () => {
+    // Locked ball cam looks straight back along the car: 180 degrees off the
+    // nose, which is the mirrored-controls case. The lean brings it to single
+    // figures.
+    expect(driveAway(0)).toBeGreaterThan(170);
+    expect(driveAway(cfg.camera.ballCamAway)).toBeLessThan(20);
+  });
+
+  it('leaves a parked car alone', () => {
+    // A car sitting still facing away from the ball is not hard to drive, and
+    // swinging the view round it would be a worse camera than the one being
+    // fixed. The lean is gated on speed as well as heading.
+    expect(driveAway(cfg.camera.ballCamAway, 0)).toBeGreaterThan(170);
+  });
+
+  it('hands the view back as the car turns towards the ball', () => {
+    // Driving at the ball is ball cam's own case and the lean must be gone,
+    // or it would have cost the framing it exists to protect.
+    const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1.6, 10, 40000);
+    const chase = new ChaseCamera(camera);
+    const ball = { x: 2600, y: 95, z: 0 };
+    const nose = new THREE.Vector3(1, 0, 0);
+    let x = -1200;
+    chase.snapTo({ x, y: 40, z: 0 }, nose);
+    // Stopped short of the ball on purpose: drive past it and the car is
+    // heading away again, which is the other test.
+    for (let t = 0; t < 2.5; t += 1 / 60) {
+      x += 1200 / 60;
+      chase.update(1 / 60, { x, y: 40, z: 0 }, { x: 1200, y: 0, z: 0 }, nose, ball, {
+        grounded: true,
+        normal: new THREE.Vector3(0, 1, 0),
+      });
+    }
+    camera.updateMatrixWorld(true);
+    const b = new THREE.Vector3(ball.x, ball.y, ball.z).project(camera);
+    expect(Math.abs(b.x)).toBeLessThan(1);
+    expect(Math.abs(b.y)).toBeLessThan(1);
+  });
+});
+
+describe('what the away lean costs', () => {
+  /**
+   * The two leans measured together, which is how they actually run.
+   *
+   * The other tests hold one or the other at zero to say what each does on
+   * its own; this one is here because the away lean buys its worst-case fix
+   * with the ball, and that trade should be written down rather than hidden
+   * behind an isolated measurement.
+   */
+  function lap(away: number): { worstOffNose: number; ballSeen: number } {
+    const restore = cfg.camera.ballCamAway;
+    cfg.camera.ballCamAway = away;
+    const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1.6, 10, 40000);
+    const chase = new ChaseCamera(camera);
+    const ball = { x: -1800, y: 95, z: 1800 };
+    const at = (t: number) => {
+      const a = t * 1.1;
+      return {
+        pos: { x: Math.cos(a) * 700, y: 40, z: Math.sin(a) * 700 },
+        nose: new THREE.Vector3(-Math.sin(a), 0, Math.cos(a)).normalize(),
+        vel: { x: -Math.sin(a) * 1200, y: 0, z: Math.cos(a) * 1200 },
+      };
+    };
+    chase.snapTo(at(0).pos, at(0).nose);
+    let worst = 0;
+    let seen = 0;
+    let total = 0;
+    for (let t = 0; t < 10; t += 1 / 60) {
+      const s = at(t);
+      chase.update(1 / 60, s.pos, s.vel, s.nose, ball, {
+        grounded: true,
+        normal: new THREE.Vector3(0, 1, 0),
+      });
+      if (t > 3) {
+        camera.updateMatrixWorld(true);
+        const view = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        view.y = 0;
+        view.normalize();
+        worst = Math.max(
+          worst,
+          (Math.acos(Math.max(-1, Math.min(1, view.dot(s.nose)))) * 180) / Math.PI,
+        );
+        const b = new THREE.Vector3(ball.x, ball.y, ball.z).project(camera);
+        if (Math.abs(b.x) < 1 && Math.abs(b.y) < 1 && b.z < 1) seen++;
+        total++;
+      }
+    }
+    cfg.camera.ballCamAway = restore;
+    return { worstOffNose: Math.round(worst), ballSeen: Math.round((seen / total) * 100) };
+  }
+
+  it('takes the nose-on moment out of a lap', () => {
+    // Without it, a lap round the ball still contains a frame 179 degrees off
+    // the nose: the car driving straight at the camera, controls mirrored.
+    // That moment is the complaint, and it is gone.
+    expect(lap(0).worstOffNose).toBeGreaterThan(170);
+    expect(lap(cfg.camera.ballCamAway).worstOffNose).toBeLessThan(90);
+  });
+
+  it('pays for it with the ball, and only a full lean is worth paying', () => {
+    // The ball is in frame for 59 percent of the lap instead of all of it —
+    // the part where the car is driving away from it. That is the intended
+    // trade, not a regression: driving away from the ball, where you are
+    // going is the thing worth seeing.
+    expect(lap(cfg.camera.ballCamAway).ballSeen).toBeGreaterThan(50);
+    expect(lap(cfg.camera.ballCamAway).ballSeen).toBeLessThan(100);
+    // Half measures buy nothing. At 0.5 the ball is in frame more often but
+    // the nose-on moment is still there in full, so the choice is a full lean
+    // or none.
+    expect(lap(0.5).worstOffNose).toBeGreaterThan(170);
   });
 });

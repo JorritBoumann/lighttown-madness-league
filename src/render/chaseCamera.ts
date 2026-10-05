@@ -53,6 +53,8 @@ export class ChaseCamera {
   private readonly lastHeading = new THREE.Vector3(1, 0, 0);
   /** Eased 0-to-1 measure of how hard the car is turning. */
   private turning = 0;
+  /** Eased 0-to-1 measure of how far the car is driving away from the ball. */
+  private driftingAway = 0;
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {}
 
@@ -107,6 +109,31 @@ export class ChaseCamera {
     }
     this.lastHeading.copy(nose);
 
+    // How far the car is driving away from the ball.
+    //
+    // Ball cam puts the camera on the line from the ball through the car, so
+    // a car heading away from the ball is heading straight at the camera: you
+    // see your own bonnet coming at you and steering reads mirrored. This is
+    // the measure that lets the framing give way before that happens.
+    //
+    // Gated on speed as well as heading. A car sitting still facing the wrong
+    // way is not hard to drive, and swinging the view round it would be a
+    // worse camera than the one being fixed.
+    this.tmp.set(ballPos.x - carPos.x, ballPos.y - carPos.y, ballPos.z - carPos.z);
+    this.tmp.addScaledVector(this.up, -this.tmp.dot(this.up));
+    let away = 0;
+    if (this.tmp.lengthSq() > 1e-4) {
+      const facing = nose.dot(this.tmp.normalize());
+      const t = c.ballCamAwayThreshold;
+      away =
+        Math.min(1, Math.max(0, (-facing - t) / Math.max(1e-3, 1 - t))) *
+        Math.min(1, speed / c.ballCamAwaySpeed);
+    }
+    if (dt > 0) {
+      const rate = away > this.driftingAway ? c.turnAttack : c.turnRelease;
+      this.driftingAway += (away - this.driftingAway) * Math.min(1, rate * dt);
+    }
+
     // How far the surface has tilted away from the floor: 0 driving the pitch,
     // 1 on a wall or the ceiling. Ball cam has to give way as this rises.
     const wallness = Math.min(1, Math.max(0, 1 - this.up.y));
@@ -159,7 +186,20 @@ export class ChaseCamera {
       // camera to recover the distance the walls stole, without re-aiming,
       // just drops the car out of the bottom of the frame — which is what the
       // first attempt at this did.
-      const bias = c.ballBias * (1 - wallness) * (1 - this.cornered * c.corneredBiasDrop);
+      // How far towards the ball to look. It gives way to the same three
+      // things the framing does: a wall, being cornered, and driving away.
+      //
+      // That last one is not optional. The lean below is a lerp between two
+      // points, and the ball-biased point is three quarters of the way to a
+      // ball that may be four thousand units behind the car — so an
+      // eighty-five percent lean towards a target three hundred units ahead
+      // still ends up looking backwards. Driving away from the ball, the ball
+      // stops being the subject; it is the wall case again.
+      const bias =
+        c.ballBias *
+        (1 - wallness) *
+        (1 - this.cornered * c.corneredBiasDrop) *
+        (1 - this.driftingAway * c.ballCamAway);
       this.tmp2.set(
         carPos.x + (ballPos.x - carPos.x) * bias,
         carPos.y + (ballPos.y - carPos.y) * bias,
@@ -187,7 +227,14 @@ export class ChaseCamera {
       // Only while actually turning. Held at a fixed lean the camera trades
       // away the ball for a heading you did not ask about; driving straight,
       // ball cam framing is the right framing and this is zero.
-      const follow = c.ballCamFollow * this.turning;
+      // Whichever asks for more: a hard turn, or driving away from the ball.
+      // They are the same fix — put the nose back down the screen — so taking
+      // the larger rather than adding them keeps a turn made while already
+      // driving away from overshooting into a full follow cam and back.
+      const follow = Math.max(
+        c.ballCamFollow * this.turning,
+        c.ballCamAway * this.driftingAway,
+      );
       if (follow > 0.001) {
         const heading = this.flatten(carForward);
         this.followPos

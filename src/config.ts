@@ -730,6 +730,30 @@ export const config = {
      * makes the view worse, not better.
      */
     ballCamFollow: 0.82,
+    /**
+     * How far ball cam leans towards the follow camera when the car is driving
+     * away from the ball, 0 to 1.
+     *
+     * This is ball cam's worst moment and it is inherent to the framing: the
+     * camera sits on the line from the ball through the car, so a car driving
+     * away from the ball is driving straight at the camera. You see the front
+     * of your own car coming at you and steering reads mirrored. Leaning most
+     * of the way to the follow camera there puts the nose back down the screen;
+     * it comes off again as soon as the car turns back towards the ball.
+     */
+    ballCamAway: 0.85,
+    /**
+     * How far past sideways the nose has to point before that lean starts.
+     *
+     * Measured as the dot of the heading against the direction to the ball, so
+     * 0 would start the lean the instant the car passed square to the ball —
+     * which is most of a normal approach, and would leave ball cam barely ever
+     * framing the ball.
+     */
+    ballCamAwayThreshold: 0.15,
+    /** Speed at which the away lean is at full strength. A parked car facing
+     *  the wrong way is not a problem and should not swing the view. */
+    ballCamAwaySpeed: 400,
     /** Heading sweep, in radians a second, that counts as a full turn. */
     turnReference: 1.0,
     /** How fast the lean comes on, and how slowly it lets go. */
