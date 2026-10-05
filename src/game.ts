@@ -29,6 +29,7 @@ import { ChaseCamera } from './render/chaseCamera';
 import { TransformInterpolator } from './core/interpolate';
 import { Loop } from './core/loop';
 import { Hud } from './ui/hud';
+import { Radar } from './ui/radar';
 import { MatchHud } from './ui/matchHud';
 import { TweakPanel } from './ui/tweakPanel';
 import { Match, formatClock, type GoalEvent, type MatchResult } from './state/match';
@@ -124,6 +125,7 @@ export class Game {
 
   private readonly controls: Controls;
   private readonly hud: Hud;
+  private readonly radar: Radar;
   private readonly matchHud: MatchHud;
   private readonly runHud: RunHud;
   private readonly replayHud: ReplayHud;
@@ -202,6 +204,7 @@ export class Game {
 
     this.controls = new Controls();
     this.hud = new Hud(ui);
+    this.radar = new Radar(ui);
     this.matchHud = new MatchHud(ui);
     this.runHud = new RunHud(ui);
     this.replayHud = new ReplayHud(ui);
@@ -559,7 +562,16 @@ export class Game {
     this.phys.events.drainCollisionEvents((h1, h2, started) => {
       if (!started) return;
       const other = h1 === ballHandle ? h2 : h2 === ballHandle ? h1 : null;
-      if (other === null) return;
+      if (other === null) {
+        // Car on car. Rapier resolves the bump itself now that the two are in
+        // each other's collision filter; this is only the feedback, which is
+        // what makes a contact register as a hit rather than as the controls
+        // going vague for a moment.
+        const a = this.byCollider.get(h1);
+        const b = this.byCollider.get(h2);
+        if (a && b && a !== b) this.onCarsCollided(a, b);
+        return;
+      }
       const entry = this.byCollider.get(other);
       if (!entry) return;
       this.carBall.apply(entry.car, this.ball);
@@ -567,6 +579,54 @@ export class Game {
       this.match.touch(entry.car.team);
       this.onBallTouched(entry);
     });
+  }
+
+  /**
+   * Sound, sparks and a shove for two cars meeting.
+   *
+   * The extra impulse on top of what the solver does is deliberate. Two boxes
+   * of equal mass meeting at a shallow angle barely deflect, which reads as
+   * scraping past someone rather than hitting them; a kick along the closing
+   * direction, scaled by how hard the contact was, is what makes a challenge
+   * feel like a challenge.
+   */
+  private onCarsCollided(a: CarEntry, b: CarEntry): void {
+    const av = a.car.velocity;
+    const bv = b.car.velocity;
+    const closing = Math.hypot(av.x - bv.x, av.y - bv.y, av.z - bv.z);
+    if (closing < cfg.car.bumpMinSpeed) return;
+
+    const ap = a.car.position;
+    const bp = b.car.position;
+    const dx = bp.x - ap.x;
+    const dy = bp.y - ap.y;
+    const dz = bp.z - ap.z;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const push = Math.min(cfg.car.bumpMaxImpulse, closing * cfg.car.bumpImpulse);
+    // Apart, along the line between them, and shared: whoever was travelling
+    // faster keeps more of their speed because they had more to begin with.
+    a.car.body.applyImpulse(
+      { x: (-dx / len) * push, y: (-dy / len) * push * 0.3, z: (-dz / len) * push },
+      true,
+    );
+    b.car.body.applyImpulse(
+      { x: (dx / len) * push, y: (dy / len) * push * 0.3, z: (dz / len) * push },
+      true,
+    );
+
+    const at = {
+      x: (ap.x + bp.x) / 2,
+      y: (ap.y + bp.y) / 2,
+      z: (ap.z + bp.z) / 2,
+    };
+    this.sound.hit(closing);
+    this.particles.burst(at, closing > 1200 ? 14 : 7, {
+      colour: IMPACT_COLOUR,
+      speed: 160 + closing * 0.25,
+      size: 22,
+      life: 0.3,
+    });
+    if (!a.bot || !b.bot) this.chase.kick(Math.min(16, closing / 180));
   }
 
   /** Sound and sparks for a car-on-ball touch, scaled by how hard it was. */
@@ -686,6 +746,20 @@ export class Game {
     this.handleHotkeys();
     this.hud.setDevice(this.controls.device);
     this.hud.update(player.car, this.chase.ballCam);
+    this.radar.update({
+      layout: this.arena.layout,
+      ball: this.ball.position,
+      pads: this.pads.pads,
+      cars: this.entries.map((entry) => ({
+        x: entry.car.position.x,
+        y: entry.car.position.y,
+        z: entry.car.position.z,
+        fwdX: entry.car.fwd.x,
+        fwdZ: entry.car.fwd.z,
+        team: entry.car.team,
+        isPlayer: entry.bot === null,
+      })),
+    });
     this.matchHud.update(this.match, dt);
     this.runHud.update(this.run, dt);
     this.controls.endFrame();

@@ -29,6 +29,18 @@ export const config = {
     /** Octane hitbox: length (nose to tail), height, width. */
     hitbox: { length: 120.507, height: 38.6591, width: 86.6994 },
     mass: 180,
+    /**
+     * Car-on-car contact.
+     *
+     * The solver's own response is weak between two boxes of equal mass meeting
+     * at a shallow angle — it reads as scraping past someone rather than
+     * hitting them — so a contact above `bumpMinSpeed` gets an extra shove
+     * along the line between the two, capped so a head-on at supersonic does
+     * not fire anyone into the stands.
+     */
+    bumpMinSpeed: 420,
+    bumpImpulse: 0.55,
+    bumpMaxImpulse: 900,
     /** Rounds the chassis collider so it slides along walls and up ramps
      *  instead of catching on a corner. */
     colliderRadius: 8,

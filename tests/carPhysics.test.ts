@@ -970,3 +970,54 @@ describe('the controls go the way they are pressed', () => {
     expect(noseOf(car).y).toBeLessThan(nose0 - 0.1);
   });
 });
+
+/**
+ * Two cars meeting.
+ *
+ * They did not. The collider's filter said `ARENA | BALL` and left `CAR` out,
+ * so cars drove straight through one another — no bump, no contest for the
+ * ball, and a bot could sit inside you. The membership bit was set all along,
+ * which is why nothing looked obviously wrong in the setup.
+ */
+describe('two cars meeting', () => {
+  it('cannot drive through each other', () => {
+    const other = new Car(phys, { x: -2400, y: 60, z: 0 }, Math.PI, 1);
+    run(1.2);
+    const gapBefore = Math.abs(other.position.x - car.position.x);
+
+    const dt = cfg.physics.fixedDt;
+    let closest = Infinity;
+    for (let i = 0; i < Math.round(2.5 / dt); i++) {
+      car.input = { ...emptyInput(), throttle: 1, boost: true };
+      other.input = emptyInput();
+      car.update(dt);
+      other.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+      closest = Math.min(closest, Math.abs(other.position.x - car.position.x));
+    }
+
+    expect(gapBefore).toBeGreaterThan(500);
+    // The hitbox is 120 long, so two cars nose to nose cannot be closer than
+    // about that. Passing through would drive this to nearly zero.
+    expect(closest).toBeGreaterThan(cfg.car.hitbox.length * 0.7);
+  });
+
+  it('shoves the one that was standing still', () => {
+    const other = new Car(phys, { x: -2200, y: 60, z: 0 }, 0, 1);
+    run(1.2);
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(2.5 / dt); i++) {
+      car.input = { ...emptyInput(), throttle: 1, boost: true };
+      other.input = emptyInput();
+      car.update(dt);
+      other.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+    }
+    // Hit from behind by a boosting car, the parked one has to have moved.
+    expect(other.position.x).toBeGreaterThan(-2100);
+  });
+});

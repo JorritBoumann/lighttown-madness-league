@@ -142,7 +142,14 @@ export class Car {
 
   // Scratch objects, reused every step so the hot loop does not allocate.
   private readonly q = new THREE.Quaternion();
-  private readonly fwd = new THREE.Vector3();
+  /**
+   * The nose, in world space, refreshed every step.
+   *
+   * Public because the radar needs a heading and recomputing it from the body
+   * quaternion on the other side of the codebase is the sort of duplicated
+   * maths that drifts — see `core/axes.ts` for what that costs.
+   */
+  readonly fwd = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private readonly vel = new THREE.Vector3();
@@ -186,7 +193,13 @@ export class Car {
         .setFriction(0.106)
         .setRestitution(0)
         .setMass(cfg.car.mass)
-        .setCollisionGroups(groups(Group.CAR, Group.ARENA | Group.BALL))
+        // Cars collide with each other as well as with the arena and the ball.
+        // The filter left `CAR` out, so two cars passed straight through one
+        // another: no bump, no contest for the ball, and a bot could sit inside
+        // you. The membership bit was always there, which is why nothing else
+        // noticed — it is the filter, the half that says what *this* collider
+        // will hit, that was short.
+        .setCollisionGroups(groups(Group.CAR, Group.ARENA | Group.BALL | Group.CAR))
         .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       this.body,
     );
