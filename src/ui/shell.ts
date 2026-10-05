@@ -37,7 +37,7 @@ export class Shell {
       padConnected ? 'connected' : 'press any button to connect'
     }</dd>`;
     this.menu.show({
-      title: 'Lighttown Madness Leaugue',
+      title: 'Lighttown Madness League',
       subtitle: 'Clear the rounds back to back. One loss ends the run.',
       bodyHtml: `<dl>${bestRows}${padRow}</dl>`,
       items: [

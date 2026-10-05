@@ -10,6 +10,17 @@ export default defineConfig({
   // The alternative is the `-compat` build, which inlines the same WebAssembly
   // as base64: a third larger, impossible to stream, and cached with the game
   // code rather than separately from it.
+  /**
+   * Relative asset URLs, so the built game runs from whatever path it is served
+   * at rather than only from the root of a domain.
+   *
+   * The default is '/', which emits `/assets/index-abc.js`. Hosted anywhere
+   * under a subdirectory — which is how a publishing platform usually serves a
+   * build — every one of those 404s and the page comes up blank with no error
+   * that points at the cause. './' is the difference between a build that works
+   * anywhere and one that works only at a domain root.
+   */
+  base: './',
   plugins: [wasm()],
   resolve: {
     alias: {

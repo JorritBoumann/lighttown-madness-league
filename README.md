@@ -1,4 +1,4 @@
-# Lighttown Madness Leaugue
+# Lighttown Madness League
 
 Browser-based, Rocket League-style arcade football, built around a gauntlet run:
 a sequence of escalating rounds you have to clear back to back.
@@ -13,6 +13,17 @@ npm run dev
 ```
 
 Then open http://127.0.0.1:5173.
+
+## Build it
+
+```bash
+npm install
+npm run build
+```
+
+The result is a static site in `dist/` — no server, no backend, no API keys.
+Asset URLs are relative, so it runs from any path a host serves it at rather
+than only from a domain root.
 
 ## Where this is up to
 
