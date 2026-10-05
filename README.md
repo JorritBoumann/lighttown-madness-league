@@ -451,6 +451,45 @@ point nothing obviously points at the arena.
 The bundle carries roughly 20kB gzipped for three's postprocessing and geometry
 utilities.
 
+## Goal replays
+
+After a goal: the celebration plays live, then the last few seconds play back
+from a camera that orbits the goal, then the kickoff. Space skips it, because by
+round twenty nobody wants to watch another one.
+
+**It replays transforms, not physics.** Re-simulating would need the whole world
+rewound exactly, and a single floating-point difference turns a goal into a
+miss. A recording of where everything was always shows what actually happened.
+Samples are taken from the live bodies rather than the interpolated meshes —
+the meshes lag by a frame by design, and a replay should show where things were,
+not where they were being drawn.
+
+The world is held by having `fixedStep` return early while one plays: no
+physics, no clock, no bots. The match rules never learn that replays exist,
+which keeps the feature a thing the renderer does.
+
+Four details that each took a go to get right:
+
+- **It starts a beat after the goal, not on it.** A replay that cuts in over the
+  celebration's hitstop throws away the one frame the whole celebration is built
+  around.
+- **The camera orbits the goal but looks at the ball where it is *now*.** Fixed
+  on the final position, the subject is off-screen for most of the replay — the
+  ball spends those seconds arriving.
+- **The meshes are snapped back afterwards.** The replay moved them to wherever
+  the recording was, so without restoring them the first live frame is the end
+  of the replay rather than the world, which reads as everything teleporting.
+- **The recording is thrown away at kickoff**, or the next goal's replay opens
+  with everything jumping back to the halfway line.
+
+Tested on the recording rather than the picture: that the ring buffer plays back
+oldest first once it has wrapped (read from the write head instead and it plays
+the tail before the head), that 60 and 240 frames a second record the same
+window, that it refuses a goal scored in the first moments because a two-frame
+replay is a flicker, and that footage of one lineup is dropped when the number
+of cars changes. That last one found a real bug: the lineup check sat below the
+sample-interval gate, so it ran on one call in four.
+
 ## Trails
 
 The ball leaves a streak when it is moving, and a car leaves one as it

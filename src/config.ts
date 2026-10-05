@@ -539,6 +539,27 @@ export const config = {
     carModel: 'assets/car.glb',
   },
 
+  /** Goal replays. See render/replay.ts. */
+  replay: {
+    /** How much footage is kept, and how often a sample is taken. */
+    seconds: 4.5,
+    interval: 1 / 30,
+    /** Playback speed. A touch under one, because the point of a replay is
+     *  seeing what you missed. */
+    speed: 0.85,
+    /** Below this many frames there is nothing worth watching — a goal in the
+     *  first moments of a round, for instance. */
+    minimumFrames: 24,
+    /** The camera's arc around where the ball finished, in radians. */
+    orbitFrom: 0.5,
+    orbitTo: 1.5,
+    orbitRadius: 1700,
+    orbitHeight: 620,
+    /** How long after the goal the replay starts: after the celebration's
+     *  slow motion has run, so the two do not fight for the same moment. */
+    startAfter: 1,
+  },
+
   /** Trails behind the ball and behind a supersonic car. */
   trails: {
     /** Ball speed at which the trail starts to show, and where it is at full

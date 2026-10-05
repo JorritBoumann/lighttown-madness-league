@@ -491,3 +491,37 @@ html, body {
   opacity: 0.45;
 }
 .boot-note.failed { color: #ff8a65; opacity: 0.9; text-transform: none; letter-spacing: 0.02em; }
+
+/* Replay badge. Top-left, clear of the round strip and the scoreboard. */
+.replay-badge {
+  position: absolute;
+  top: 86px;
+  left: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(8, 12, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #e8eefb;
+  pointer-events: none;
+}
+.replay-badge[hidden] { display: none !important; }
+.replay-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff5a3c;
+  opacity: 0.25;
+  transition: opacity 120ms linear;
+}
+.replay-badge.on .replay-dot { opacity: 1; }
+.replay-skip {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: rgba(220, 230, 246, 0.55);
+}

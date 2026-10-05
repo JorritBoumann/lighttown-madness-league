@@ -21,6 +21,7 @@ import { buildStadium, type Stadium } from './render/stadium';
 import { loadAssets, EMPTY_ASSETS, type GameAssets } from './render/assets';
 import { GoalMoment } from './render/goalMoment';
 import { Ribbon } from './render/ribbon';
+import { Replay } from './render/replay';
 import { clamp } from './core/mathx';
 import { buildArenaLayout } from './core/arenaLayout';
 import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
@@ -38,6 +39,7 @@ import { needsArenaRebuild } from './state/modifiers';
 import { applyUpgrades, type Upgrade } from './state/upgrades';
 import { resetModifiers } from './physics/car';
 import { RunHud } from './ui/runHud';
+import { ReplayHud } from './ui/replayHud';
 import { Shell, type Screen } from './ui/shell';
 import { Particles } from './render/particles';
 import { Sound } from './audio/sound';
@@ -91,6 +93,9 @@ export class Game {
   private readonly goalMoment: GoalMoment;
   /** The ball's trail. */
   private readonly ballTrail: Ribbon;
+  /** Goal replays, and the countdown to one starting. */
+  private readonly replay = new Replay();
+  private replayPending = -1;
   /** The ring thrown off when a car crosses into supersonic. */
   private readonly sonicRing: THREE.Mesh;
   private readonly sonicRingMaterial: THREE.MeshBasicMaterial;
@@ -117,6 +122,7 @@ export class Game {
   private readonly hud: Hud;
   private readonly matchHud: MatchHud;
   private readonly runHud: RunHud;
+  private readonly replayHud: ReplayHud;
   private readonly shell: Shell;
   private readonly particles = new Particles();
   private readonly sound = new Sound();
@@ -194,6 +200,7 @@ export class Game {
     this.hud = new Hud(ui);
     this.matchHud = new MatchHud(ui);
     this.runHud = new RunHud(ui);
+    this.replayHud = new ReplayHud(ui);
     this.shell = new Shell(ui);
     this.panel = new TweakPanel(ui);
     this.panel.onChange(() => this.syncConfig());
@@ -408,6 +415,7 @@ export class Game {
     const forPlayer = event.team === 0;
     this.sound.goal(forPlayer);
     this.chase.kick(34);
+    this.replayPending = cfg.replay.startAfter;
     this.goalMoment.trigger(
       this.ball.position,
       this.ball.position.x > 0 ? 1 : -1,
@@ -439,18 +447,37 @@ export class Game {
       entry.streak.clear();
       entry.wasSupersonic = false;
     }
+    // A recording must never span a kickoff, or the replay of the next goal
+    // opens with everything teleporting back to the halfway line.
+    this.replay.reset();
+    this.replayPending = -1;
+    this.replayHud.hide();
     this.chase.snapTo(this.player.car.position, this.player.car.forward());
   }
 
   // --- simulation --------------------------------------------------------
 
   private fixedStep(dt: number): void {
+    // A replay is a recording being played back, so nothing may advance while
+    // it runs: not the physics, not the clock, not the bots. The match is held
+    // here rather than paused inside Match, so the replay stays a thing the
+    // renderer does and the match rules never have to know about it.
+    if (this.replay.playing) return;
+
     this.time += dt;
 
     for (const entry of this.entries) {
       entry.interp.record(entry.car.position, entry.car.body.rotation());
     }
     this.ballInterp.record(this.ball.position, this.ball.body.rotation());
+
+    // Recorded from the bodies, not the interpolated meshes: the meshes lag by
+    // design, and a replay should show where things were.
+    this.replay.record(
+      dt,
+      this.entries.map((e) => ({ position: e.car.position, rotation: e.car.body.rotation() })),
+      { position: this.ball.position, rotation: this.ball.body.rotation() },
+    );
 
     const phase = this.match.phase;
     // Only 'playing' hands control over. The countdown holds everyone on their
@@ -611,6 +638,16 @@ export class Game {
     // Hand the real frame time to the adaptive resolution. `dt` here is the
     // render delta, which is the frame time whatever the physics did inside it.
     this.render.pace(dt * 1000);
+
+    if (this.updateReplay(dt)) {
+      // Playing back: the meshes and the camera are the replay's, and the
+      // live trails would be drawn from stale positions.
+      this.hud.setDevice(this.controls.device);
+      this.controls.endFrame();
+      this.render.pace(dt * 1000);
+      this.render.draw();
+      return;
+    }
 
     this.updateTrails(dt);
     this.goalMoment.update(dt);
@@ -828,6 +865,64 @@ export class Game {
         drag: 2.0,
       });
     }
+  }
+
+  /**
+   * Runs the goal replay. Returns true while one is playing.
+   *
+   * Started a beat after the goal rather than on it, so the celebration's slow
+   * motion gets its moment first: a replay that cuts in over the hitstop
+   * throws away the one frame the whole celebration is built around.
+   */
+  private updateReplay(dt: number): boolean {
+    if (this.replayPending >= 0) {
+      this.replayPending -= dt;
+      if (this.replayPending < 0) {
+        this.replayPending = -1;
+        // Framed on where the ball ended up, which is in the net.
+        if (!this.replay.start(this.ball.position)) return false;
+        this.replayHud.show();
+      }
+    }
+
+    if (!this.replay.playing) return false;
+
+    // Skippable. Nobody wants to watch the same replay at round twenty.
+    if (this.controls.pressed('menuSelect') || this.controls.pressed('pause')) {
+      this.replay.stop();
+      this.replayHud.hide();
+      this.restoreFromReplay();
+      return false;
+    }
+
+    const meshes = this.entries.map((e) => e.mesh);
+    this.replay.apply(meshes, this.ballMesh);
+    this.replay.frameCamera(this.render.camera, this.ballMesh);
+    this.replayHud.update(dt);
+
+    if (!this.replay.update(dt)) {
+      this.replayHud.hide();
+      this.restoreFromReplay();
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Puts the meshes back where the simulation actually left them.
+   *
+   * The replay moved them to wherever the recording was. Without this the
+   * first frame after it is the end of the replay rather than the live world,
+   * which reads as the ball teleporting.
+   */
+  private restoreFromReplay(): void {
+    for (const entry of this.entries) {
+      entry.interp.snap(entry.car.position, entry.car.body.rotation());
+    }
+    this.ballInterp.snap(this.ball.position, this.ball.body.rotation());
+    this.ballTrail.clear();
+    for (const entry of this.entries) entry.streak.clear();
+    this.chase.snapTo(this.player.car.position, this.player.car.forward());
   }
 
   /**
