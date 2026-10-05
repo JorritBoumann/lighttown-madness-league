@@ -10,6 +10,7 @@ import {
   pitchTexture,
   netTexture,
   wallTexture,
+  goalHexTexture,
   rampTexture,
   rampNormalMap,
   grassNormalMap,
@@ -272,9 +273,17 @@ export function buildArenaMesh(): THREE.Group {
     side: THREE.DoubleSide,
     depthWrite: false,
   });
+  // The inside of the goal box, patterned rather than plain. A flat dark
+  // rectangle behind a bright surround merged into one coloured block at the
+  // distance you actually aim from; the lattice gives the opening depth.
+  const goalHex = goalHexTexture();
+  goalHex.wrapS = goalHex.wrapT = THREE.RepeatWrapping;
+  goalHex.repeat.set(3, 2);
   const goalBoxMat = new THREE.MeshStandardMaterial({
-    color: 0x2b3340,
-    roughness: 0.8,
+    map: goalHex,
+    color: 0x1a2130,
+    roughness: 0.85,
+    envMapIntensity: 0.1,
     side: THREE.DoubleSide,
   });
 
@@ -288,25 +297,20 @@ export function buildArenaMesh(): THREE.Group {
 
   const solidTop = cfg.arena.hoardingHeight;
   for (const panel of layout.panels) {
-    // A plain wall is drawn as two panels: solid hoardings up to the top of the
-    // boards, glass from there to the ceiling. Everything else is unchanged.
+    // A plain wall is drawn as two bands; see `splitWallPanel`.
     const bands: { height: number; centre: number; material: THREE.Material }[] =
-      panel.kind === 'wall' && !panel.pitch && panel.half.y * 2 > solidTop * 1.5
-        ? [
-            {
-              height: solidTop,
-              centre: solidTop / 2,
-              // Tiled to this run's own length, so nothing is stretched.
-              material: wallMaterialFor(Math.max(panel.half.x, panel.half.z) * 2),
-            },
-            {
-              height: panel.half.y * 2 - solidTop,
-              centre: solidTop + (panel.half.y * 2 - solidTop) / 2,
-              material: glassMat,
-            },
-          ]
-        : [
-            {
+      splitWallPanel(panel, solidTop).map((band) => ({
+        height: band.height,
+        centre: band.centre,
+        material:
+          band.kind === 'solid'
+            // Tiled to this run's own length, so nothing is stretched.
+            ? wallMaterialFor(Math.max(panel.half.x, panel.half.z) * 2)
+            : glassMat,
+      }));
+    if (bands.length === 0) {
+      bands.push(
+          {
               height: panel.half.y * 2,
               centre: panel.pos.y,
               material:
@@ -320,8 +324,9 @@ export function buildArenaMesh(): THREE.Group {
                       panel.half.z > panel.half.x,
                     )
                   : (byKind[panel.kind ?? 'wall'] ?? wallMat),
-            },
-          ];
+          },
+      );
+    }
 
     for (const band of bands) {
       const geo = new THREE.BoxGeometry(panel.half.x * 2, band.height, panel.half.z * 2);
@@ -378,6 +383,47 @@ export function buildArenaMesh(): THREE.Group {
   }
 
   return group;
+}
+
+/**
+ * How one wall panel divides into a solid band and a glass band.
+ *
+ * A plain wall is solid hoardings up to the top of the boards and glass from
+ * there to the ceiling, so you can see the crowd from the floor. The division
+ * is against the panel's *own* vertical extent, which is the part the first
+ * version got wrong: it assumed every wall panel stood on the ground. That is
+ * true of the side and end walls and false of the lintel over each goal mouth,
+ * which spans the goal's height to the ceiling — so the lintel was given a
+ * band of hoardings from y 0 to 620 and hung it straight across the goal
+ * mouth. The goal read as a dark recess with a sponsor board in it.
+ *
+ * Returns an empty list for anything that is not a tall plain wall; the caller
+ * draws those as a single band of their own kind.
+ */
+export function splitWallPanel(
+  panel: ArenaLayout['panels'][number],
+  solidTop: number,
+): { height: number; centre: number; kind: 'solid' | 'glass' }[] {
+  if (panel.kind !== 'wall' || panel.pitch) return [];
+  const bottom = panel.pos.y - panel.half.y;
+  const top = panel.pos.y + panel.half.y;
+  if (top - bottom <= solidTop * 1.5) return [];
+
+  const bands: { height: number; centre: number; kind: 'solid' | 'glass' }[] = [];
+  const solidLow = Math.max(bottom, 0);
+  const solidHigh = Math.min(top, solidTop);
+  if (solidHigh - solidLow > 1) {
+    bands.push({
+      height: solidHigh - solidLow,
+      centre: (solidLow + solidHigh) / 2,
+      kind: 'solid',
+    });
+  }
+  const glassLow = Math.max(bottom, solidTop);
+  if (top - glassLow > 1) {
+    bands.push({ height: top - glassLow, centre: (glassLow + top) / 2, kind: 'glass' });
+  }
+  return bands;
 }
 
 /**
@@ -444,8 +490,19 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
       map: tex,
       alphaMap: tex,
       transparent: true,
-      alphaTest: 0.4,
-      color: 0xeaf1ff,
+      // Low, because the strands are thin and mipmapping averages them down.
+      // At 0.4 a net sixteen tiles wide vanished entirely at any distance: each
+      // strand covers a fraction of a pixel, the mip chain blends that fraction
+      // towards zero alpha, and the whole panel fails the test. The goal mouth
+      // read as an empty void.
+      alphaTest: 0.18,
+      color: 0xb8c6dd,
+      // The goal box is a closed box with no light in it, so every surface in
+      // there came out black and the netting was invisible — the mouth read as
+      // a void rather than as a net you can put a ball into. The lamp below
+      // lights it; this keeps the strands readable even edge-on.
+      emissive: 0x1e2634,
+      emissiveIntensity: 1,
       roughness: 0.8,
       side: THREE.DoubleSide,
     });
@@ -505,7 +562,11 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
     new THREE.MeshBasicMaterial({
       color: colour,
       transparent: true,
-      opacity: 0.16,
+      // Barely there. At 0.16 this was a sheet of team colour hung across the
+      // opening, so the net and the box behind it were invisible and the goal
+      // read as a solid orange or blue slab from anywhere down the pitch. The
+      // goal celebration still flares it, which is what it is really for.
+      opacity: 0.04,
       side: THREE.DoubleSide,
       depthWrite: false,
     }),
@@ -513,7 +574,7 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
   mouth.position.set(goal.x, goal.height / 2, 0);
   mouth.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
   mouth.name = `goal-mouth-${goal.sign}`;
-  (mouth.material as THREE.Material).userData.baseOpacity = 0.16;
+  (mouth.material as THREE.Material).userData.baseOpacity = 0.04;
   group.add(mouth);
 
   // A surround around the mouth, lit in the end's colour.
@@ -532,7 +593,7 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
   // put them back to.
   surroundMat.userData.baseEmissive = 0.9;
   surroundMat.name = `goal-surround-${goal.sign}`;
-  const band = 70;
+  const band = 34;
   const surroundX = goal.x + goal.sign * 20;
   // Lintel across the top, then an upright each side of the mouth.
   const lintel = new THREE.Mesh(
@@ -549,6 +610,43 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
     upright.position.set(surroundX, (goal.height + band) / 2, zs * (goal.width / 2 + band / 2));
     group.add(upright);
   }
+
+  // A thin lit lip just inside the surround, drawn with tone mapping off so it
+  // is brighter than the tone curve's white point and the bloom pass catches
+  // it. This is what makes the goal read as an outlined opening rather than a
+  // coloured panel: the light is on the edge, and the middle stays dark.
+  const lipMat = new THREE.MeshBasicMaterial({ color: colour, toneMapped: false });
+  const lip = 12;
+  const lipX = goal.x + goal.sign * 2;
+  const lintelLip = new THREE.Mesh(
+    new THREE.BoxGeometry(8, lip, goal.width + lip * 2),
+    lipMat,
+  );
+  lintelLip.position.set(lipX, goal.height + lip / 2, 0);
+  group.add(lintelLip);
+  for (const zs of [1, -1]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(8, goal.height, lip), lipMat);
+    side.position.set(lipX, goal.height / 2, zs * (goal.width / 2 + lip / 2));
+    group.add(side);
+  }
+
+  // A lamp inside the box, in the end's colour.
+  //
+  // This is what a goal in this game actually looks like in every version worth
+  // copying: a lit recess, not a coloured panel. It also does the job the
+  // flat mouth wash was failing at — telling you which end you are attacking
+  // from the other end of the pitch — while leaving the net and the lattice
+  // visible instead of hiding them behind a sheet of team colour.
+  //
+  // The intensity has to be scaled to the arena's units or it does nothing at
+  // all. three's point lights fall off as 1/distance^decay, and at a decay of
+  // 1.6 over the four hundred-odd units from the lamp to the net that divisor
+  // is about fourteen thousand — so the 3.2 this started at delivered an
+  // irradiance of 0.0002 and the box stayed black. Derived from the depth so it
+  // stays right if a round modifier changes the goal.
+  const lamp = new THREE.PointLight(colour, Math.pow(depth, 1.6) * 2.4, depth * 3.4, 1.6);
+  lamp.position.set(goal.x - inward * depth * 0.55, goal.height * 0.55, 0);
+  group.add(lamp);
 
   // And a lit floor strip across the line, which is what tells you the ball
   // actually crossed rather than rattled the frame.

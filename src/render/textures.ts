@@ -241,12 +241,56 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
 }
 
 /** Goal netting: a grid that is mostly holes. */
+/**
+ * The goal box's inner walls: a dark hex lattice.
+ *
+ * The goal is the one thing you aim at from ten thousand units away, and it
+ * was a flat dark rectangle with a bright surround round it — which at
+ * distance merged into a solid coloured block with no depth. A patterned
+ * interior is what makes the opening read as somewhere the ball goes *into*.
+ */
+export function goalHexTexture(): THREE.Texture {
+  const S = 512;
+  const [el, ctx] = canvas(S, S);
+  ctx.fillStyle = '#0d1118';
+  ctx.fillRect(0, 0, S, S);
+
+  // A hex lattice, drawn as outlines so the dark ground shows through.
+  const r = S / 9;
+  const h = r * Math.sqrt(3);
+  ctx.lineWidth = Math.max(1.5, S / 220);
+  ctx.strokeStyle = 'rgba(126,150,186,0.42)';
+  for (let row = -1; row * (h / 2) < S + h; row++) {
+    for (let col = -1; col * (r * 1.5) < S + r * 2; col++) {
+      const cx = col * r * 1.5;
+      const cy = row * h + (col % 2 ? h / 2 : 0);
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const a = (Math.PI / 3) * k;
+        const x = cx + Math.cos(a) * r * 0.92;
+        const y = cy + Math.sin(a) * r * 0.92;
+        if (k === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  return finish(el, true);
+}
+
 export function netTexture(): THREE.Texture {
   const S = 128;
   const [el, ctx] = canvas(S, S);
   ctx.clearRect(0, 0, S, S);
-  ctx.strokeStyle = 'rgba(236,242,255,0.95)';
-  ctx.lineWidth = 2.5;
+  // Finer and dimmer than it was. A bright, coarse grid reads as a window
+  // frame across the mouth; a dense dull one reads as netting with a dark box
+  // behind it.
+  // Thicker strands than looks right in the tile, for the same reason the
+  // alpha test is low: these end up a fraction of a pixel wide on screen, and
+  // anything thinner disappears into the mip chain.
+  ctx.strokeStyle = 'rgba(214,226,244,0.95)';
+  ctx.lineWidth = 4;
   const cells = 8;
   for (let i = 0; i <= cells; i++) {
     const p = (i / cells) * S;

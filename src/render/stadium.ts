@@ -33,6 +33,9 @@ export interface Stadium {
   celebrate(seconds: number): void;
 }
 
+/** Reused for the spectators' facing rotation. */
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+
 /** One straight run of the arena's footprint, with its outward normal. */
 interface Edge {
   mid: THREE.Vector2;
@@ -110,7 +113,14 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   group.name = 'stadium';
   const edges = footprintEdges(layout);
 
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x1d2330, roughness: 0.94 });
+  // Almost no environment response. With a dusk sky in the environment map the
+  // bowl picked up the warm horizon and the empty aisles read as wedges of
+  // salmon carpet — the brightest thing in the stands.
+  const concrete = new THREE.MeshStandardMaterial({
+    color: 0x1d2330,
+    roughness: 0.94,
+    envMapIntensity: 0.08,
+  });
   const structure = new THREE.MeshStandardMaterial({ color: 0x47505e, roughness: 0.8, metalness: 0.35 });
 
   // --- seating bowl ------------------------------------------------------
@@ -167,8 +177,14 @@ export function buildStadium(layout: ArenaLayout): Stadium {
           const t = i / count - 0.5;
           // Gangways. A continuous band of people looks like a texture; the
           // breaks are what make it read as seating people walk between.
-          const block = Math.floor((i / count) * s.gangways * 2);
-          if (block % 2 === 1 && Math.abs(((i / count) * s.gangways * 2) % 1) < 0.22) continue;
+          //
+          // Keyed to the position along the row rather than to the seat index.
+          // `count` changes from row to row because the rows get longer as they
+          // go back, so an index-based aisle landed in a different place in
+          // every row and the gaps fanned out into wedges of bare concrete.
+          // A real aisle runs straight up the bowl.
+          const aisle = Math.abs(((t + 0.5) * s.gangways) % 1 - 0.5);
+          if (aisle > 0.38) continue;
 
           const jitterA = (Math.sin(i * 12.9898 + row * 78.233) * 43758.5453) % 1;
           const jitterB = (Math.sin(i * 39.3468 + row * 11.135) * 24634.6345) % 1;
@@ -184,6 +200,15 @@ export function buildStadium(layout: ArenaLayout): Stadium {
           );
           const build = 0.78 + Math.abs(jitterA) * 0.44;
           scale.set(s.seatWidth, s.seatHeight * build, s.seatWidth * 0.8);
+          // Facing the pitch, plus a little scatter.
+          //
+          // Every instance used to take the identity rotation, so a spectator
+          // in the end stand and one on the corner diagonal were both aligned
+          // to the world axes rather than to their own row — which is a large
+          // part of why the crowd read as brickwork. People in a stand face
+          // the game, and not one of them is exactly square to it.
+          const facing = Math.atan2(-edge.normal.x, -edge.normal.y);
+          quat.setFromAxisAngle(UP_AXIS, facing + jitterB * 0.5);
           matrix.compose(pos, quat, scale);
           crowd.push({ m: matrix.clone(), shade: Math.abs(jitterA) });
         }
@@ -197,17 +222,41 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   for (const geo of slabs) geo.dispose();
 
   // --- crowd -------------------------------------------------------------
-  // Muted clothing, not a rainbow: a crowd reads as a crowd because it is dense
-  // and slightly varied, and saturated specks look like confetti.
-  const palette = [0x1d2534, 0x2a3346, 0x4a2f2a, 0x24405a, 0x3a3f4b, 0x515b6b, 0x6b5340].map(
-    (c) => new THREE.Color(c),
-  );
+  // A body with a head on it, rather than a box.
+  //
+  // One box per spectator is what made the stands read as a brick wall, and no
+  // amount of colour variation fixes a silhouette. Two boxes is enough: the
+  // head breaks the top edge of the row, and a row with a broken top edge
+  // reads as people even when each one is only a few pixels tall.
+  const personParts = [
+    new THREE.BoxGeometry(1, 0.68, 1).translate(0, -0.16, 0),
+    new THREE.BoxGeometry(0.52, 0.3, 0.52).translate(0, 0.33, 0),
+  ];
+  const personGeo = mergeGeometries(personParts, false);
+  for (const geo of personParts) geo.dispose();
+
+  // Clothing. Mid-tones and the two house colours, not a rainbow and not the
+  // near-black it was: a crowd reads because it is dense and varied, and at
+  // dusk the old muted palette went to a single dark speckle.
+  const palette = [
+    0x44557a, 0x6b7f9f, 0xb8c0cc, 0x3f86c4, 0xd4794a, 0x8b93a2, 0xe2e8ef, 0x9a5f6e,
+    0x55684f, 0xf0bd78,
+  ].map((c) => new THREE.Color(c));
   const people = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    // No self-lighting needed in daylight: the sky fills the seating. It was
-    // there for the night version, where four keys aimed at the pitch left the
-    // crowd almost black at gameplay distance.
-    new THREE.MeshStandardMaterial({ roughness: 0.88 }),
+    personGeo,
+    // A dark floor of self-lighting, so nobody in the back rows is pure black.
+    // The daylight version had none because the sky filled the seating; at dusk
+    // the keys are aimed at the pitch and the stands get very little.
+    new THREE.MeshStandardMaterial({
+      roughness: 0.88,
+      // A real crowd is lit by the same floodlights the pitch is, and ours are
+      // furniture that does no lighting work. Rather than add four more lights
+      // for the sake of some of the smallest geometry in the scene, the
+      // spectators carry their own floor of brightness; the variation still
+      // comes through the per-instance colour above it.
+      emissive: 0x3c4760,
+      emissiveIntensity: 1,
+    }),
     crowd.length,
   );
   const colour = new THREE.Color();
@@ -215,7 +264,7 @@ export function buildStadium(layout: ArenaLayout): Stadium {
     people.setMatrixAt(i, crowd[i]!.m);
     colour.copy(palette[i % palette.length]!);
     // Rows further back sit in deeper shadow.
-    colour.multiplyScalar(0.72 + crowd[i]!.shade * 0.5);
+    colour.multiplyScalar(0.8 + crowd[i]!.shade * 0.45);
     people.setColorAt(i, colour);
   }
   people.instanceMatrix.needsUpdate = true;
