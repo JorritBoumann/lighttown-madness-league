@@ -1,7 +1,7 @@
 import { Simulation } from '../sim/simulation';
 import { buildRound } from '../state/round';
 import { emptyInput, type CarInput } from '../input/types';
-import { cfg } from '../config';
+
 import type { BodyState, ServerMessage, SnapshotMessage } from './protocol';
 
 /**
@@ -36,7 +36,8 @@ export interface ServerOptions {
 
 export class GameServer {
   readonly sim: Simulation;
-  readonly stepSeconds = cfg.physics.fixedDt;
+  /** Taken from the simulation, so both ends cannot disagree about the rate. */
+  readonly stepSeconds: number;
   private readonly clients = new Map<number, ClientHandle>();
   private readonly inputs = new Map<number, CarInput>();
   private nextId = 1;
@@ -45,6 +46,7 @@ export class GameServer {
   constructor(private readonly options: ServerOptions = {}) {
     const random = options.random ?? Math.random;
     this.sim = new Simulation(random);
+    this.stepSeconds = this.sim.stepSeconds;
 
     // One car per seat, created up front: a car appearing mid-match would have
     // to be announced, and there is no message for that yet.
@@ -136,8 +138,8 @@ export class GameServer {
       type: 'snapshot',
       tick: this.tick,
       ack: handle?.ack ?? 0,
-      cars: this.sim.cars.map((c) => bodyState(c.car.position, c.car.body.rotation())),
-      ball: bodyState(this.sim.ball.position, this.sim.ball.body.rotation()),
+      cars: this.sim.cars.map((c) => bodyState(c.car.body)),
+      ball: bodyState(this.sim.ball.body),
       clock: this.sim.match.clock,
       score: [...this.sim.match.score] as [number, number],
     };
@@ -151,10 +153,16 @@ export class GameServer {
 /** Snapshots a tenth as often as the simulation steps; clients interpolate. */
 export const SNAPSHOT_HZ = 30;
 
-function bodyState(
-  p: { x: number; y: number; z: number },
-  r: { x: number; y: number; z: number; w: number },
-): BodyState {
+function bodyState(body: {
+  translation(): { x: number; y: number; z: number };
+  rotation(): { x: number; y: number; z: number; w: number };
+  linvel(): { x: number; y: number; z: number };
+  angvel(): { x: number; y: number; z: number };
+}): BodyState {
+  const p = body.translation();
+  const r = body.rotation();
+  const v = body.linvel();
+  const w = body.angvel();
   // Rounded on the way out. At a tenth of a unit the difference is far below
   // anything visible on a car 120 long, and it takes a third off the JSON.
   const round = (n: number): number => Math.round(n * 10) / 10;
@@ -162,5 +170,7 @@ function bodyState(
   return {
     p: [round(p.x), round(p.y), round(p.z)],
     r: [fine(r.x), fine(r.y), fine(r.z), fine(r.w)],
+    v: [round(v.x), round(v.y), round(v.z)],
+    w: [fine(w.x), fine(w.y), fine(w.z)],
   };
 }

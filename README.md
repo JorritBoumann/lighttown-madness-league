@@ -1099,6 +1099,17 @@ npm run server          # ws://localhost:8080, 2 seats, 1 bot
 PORT=9000 SEATS=4 BOTS=0 npm run server
 ```
 
+Then open `net.html` against it:
+
+```
+http://127.0.0.1:5173/net.html?server=ws://localhost:8080
+```
+
+Open it twice and the two browsers see each other. It is a separate page from
+the game on purpose: the single-player one owns a run, upgrades and round
+modifiers, all of which the server would have to own instead, and this is the
+smallest thing that proves the protocol.
+
 Clients send `CarInput` and nothing else — there is no message carrying a
 position, so a client cannot assert one. The server replies with snapshots at
 30Hz while simulating at 120Hz, each carrying the last input sequence it

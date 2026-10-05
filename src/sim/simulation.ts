@@ -75,6 +75,14 @@ export interface StepOptions {
 }
 
 export class Simulation {
+  /**
+   * The step both ends run at.
+   *
+   * On the simulation rather than read from config at each call site, because a
+   * client replaying its own inputs has to re-run exactly the steps the server
+   * took. Two places reading the same constant is fine until one of them stops.
+   */
+  readonly stepSeconds = cfg.physics.fixedDt;
   readonly phys: PhysicsWorld;
   readonly ball: Ball;
   readonly pads: BoostPads;

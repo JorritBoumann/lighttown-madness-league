@@ -49,11 +49,16 @@ export default defineConfig(({ isSsrBuild }) => ({
   server: { port: 5173, host: '127.0.0.1' },
   build: {
     target: 'es2022',
+
     // Three is about 520kB minified and there is no getting it much below that
     // while using a renderer at all, so the default 500kB warning fires on every
     // build and means nothing. Set above it, so it means something again.
     chunkSizeWarningLimit: 600,
     rolldownOptions: {
+      // Two pages: the game, and the networked client. This build uses
+      // rolldown, so `rollupOptions` here is read by nobody and the second page
+      // simply does not get built.
+      input: { main: 'index.html', net: 'net.html' },
       output: {
         // Three and Rapier change far less often than the game does, so they
         // get their own chunks and stay in the browser cache across deploys.
