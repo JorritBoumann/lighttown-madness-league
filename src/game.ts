@@ -12,6 +12,7 @@ import { emptyInput, type CarInput } from './input/types';
 import { Bot, type BotRole } from './ai/bot';
 import { createRenderer, buildArenaMesh, disposeArenaMesh, type Renderer } from './render/scene';
 import { buildStadium, type Stadium } from './render/stadium';
+import { loadAssets, EMPTY_ASSETS, type GameAssets } from './render/assets';
 import { buildArenaLayout } from './core/arenaLayout';
 import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
 import { ChaseCamera } from './render/chaseCamera';
@@ -71,6 +72,8 @@ export class Game {
    * goals, which rebuilds the arena, but it never changes the stands.
    */
   private readonly stadium: Stadium;
+  /** Optional art files; empty unless something was dropped in public/assets. */
+  private readonly assets: GameAssets;
   private readonly ball: Ball;
   private readonly pads: BoostPads;
   private readonly carBall = new CarBallInteraction();
@@ -130,14 +133,23 @@ export class Game {
 
   private readonly ui: HTMLElement;
 
-  private constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
+  private constructor(
+    ui: HTMLElement,
+    render: Renderer,
+    assets: GameAssets = EMPTY_ASSETS,
+  ) {
     this.ui = ui;
+    this.assets = assets;
     this.phys = new PhysicsWorld();
     this.arena = createArena(this.phys);
     this.ball = new Ball(this.phys);
     this.pads = new BoostPads();
 
-    this.render = createRenderer(canvas);
+    this.render = render;
+    // A supplied radiance map replaces the generated gradient for reflections
+    // only. The night sky behind the stands stays as it is: an indoor radiance
+    // map used as a backdrop puts someone else's building behind ours.
+    if (assets.environment) this.render.scene.environment = assets.environment;
     this.arenaMesh = buildArenaMesh();
     this.render.scene.add(this.arenaMesh);
     this.stadium = buildStadium(buildArenaLayout());
@@ -182,7 +194,12 @@ export class Game {
 
   static async create(canvas: HTMLCanvasElement, ui: HTMLElement): Promise<Game> {
     await initPhysics();
-    return new Game(canvas, ui);
+    // The renderer is needed to prefilter a radiance map, and nothing can be
+    // built before the physics is up, so assets load between the two. Missing
+    // files are the normal case and are not an error: see render/assets.ts.
+    const probe = createRenderer(canvas);
+    const assets = await loadAssets(probe.renderer);
+    return new Game(ui, probe, assets);
   }
 
   start(): void {
@@ -200,7 +217,9 @@ export class Game {
   ): CarEntry {
     const spawn = this.spawnFor(team, slot);
     const car = new Car(this.phys, this.spawnPosition(spawn), spawn.yaw, team);
-    const mesh = createCarMesh(TEAM_COLOUR[team]);
+    const mesh = this.assets.carModel
+      ? (this.assets.carModel.clone(true) as THREE.Group)
+      : createCarMesh(TEAM_COLOUR[team]);
     this.render.scene.add(mesh);
 
     const entry: CarEntry = {

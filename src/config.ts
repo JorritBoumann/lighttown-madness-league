@@ -525,6 +525,18 @@ export const config = {
     tunnelHeight: 560,
   },
 
+  /**
+   * Optional art files, looked for under `public/assets`. Absent by default:
+   * the game generates everything it needs, and anything here is an upgrade
+   * rather than a requirement.
+   */
+  assets: {
+    /** Radiance map (.hdr) used for reflections. */
+    environment: 'assets/environment.hdr',
+    /** Car body (.glb), fitted to the hitbox on load. */
+    carModel: 'assets/car.glb',
+  },
+
   render: {
     /** Tone-mapping exposure. Higher is brighter before the filmic rolloff. */
     exposure: 1.02,

@@ -305,6 +305,28 @@ of reach of code written by hand, and the references that look better than this
 use downloaded Rocket League models. Those are Epic's, so they are not an option
 here whatever they look like.
 
+### Art files are optional
+
+There is a loader for a radiance map and a car model, and neither is present.
+`public/assets` is empty, the game generates everything it needs, and anything
+dropped in that folder is an upgrade rather than a requirement — see the note in
+that folder for what the two files change and which is worth doing first.
+
+The fallback is the design, not a convenience. The repository stays asset-free
+and licence-free by default, an art file is never a build dependency, and a
+missing or malformed one degrades to the generated version instead of a blank
+screen. Files are probed with a HEAD request first, because a loader pointed at
+a missing file logs a network error and throws — and a console full of red on
+every boot of a game that is working perfectly is its own kind of bug.
+
+A supplied radiance map is prefiltered through `PMREMGenerator` and used for
+reflections only; the night sky behind the stands stays as it is, since an
+indoor radiance map used as a backdrop puts someone else's building behind ours.
+A supplied car is measured and fitted to the hitbox — scaled so its longest
+horizontal axis matches the hitbox length, turned to face +x, and dropped so its
+underside sits on the wheel contact line — so a file does not have to be
+prepared to this game's conventions to work.
+
 ### Holding the frame rate
 
 The renderer measures its own frame time and moves the render resolution to
