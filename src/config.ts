@@ -514,6 +514,27 @@ export const config = {
     exposure: 1.02,
     /** How much the sky gradient lights the scene through reflections. */
     environmentIntensity: 0.22,
+    /**
+     * Adaptive resolution. The renderer holds the frame rate by moving the
+     * pixel ratio between `scaleFloor` and the display's own, which is why
+     * there is no quality setting to get wrong.
+     */
+    /** Frame time above which the resolution drops. ~60fps with headroom. */
+    scaleDownMs: 17.5,
+    /** And below which it climbs back. The gap between the two is what stops
+     *  it hunting between two resolutions for ever. */
+    scaleUpMs: 11.5,
+    /** Never go below this pixel ratio, however slow the machine. */
+    scaleFloor: 0.7,
+    scaleStep: 0.15,
+    /** Frames judged before acting, and seconds to settle after a change. */
+    scaleWindow: 45,
+    scaleCooldown: 1.2,
+    /** Frames longer than this are stutters, not the frame rate: a tab
+     *  returning from the background or a round rebuild, which should not
+     *  drag the resolution down with them. */
+    scaleOutlierMs: 90,
+
     /** Bloom: threshold is the brightness a pixel needs before it blooms. */
     bloomStrength: 0.62,
     bloomRadius: 0.62,

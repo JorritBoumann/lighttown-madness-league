@@ -510,6 +510,10 @@ export class Game {
       );
     }
 
+    // Hand the real frame time to the adaptive resolution. `dt` here is the
+    // render delta, which is the frame time whatever the physics did inside it.
+    this.render.pace(dt * 1000);
+
     this.stadium.update(dt, {
       blue: this.match.score[0],
       orange: this.match.score[1],

@@ -223,7 +223,39 @@ The building is built once rather than per round: a modifier can change the
 goals, which rebuilds the arena, but it never changes the stands. Verified
 across five rebuilds — one arena, one stadium, texture count flat.
 
-Cost: around 225 draw calls and 180,000 triangles for the whole arena, crowd
+### Holding the frame rate
+
+The renderer measures its own frame time and moves the render resolution to
+suit, between the display's own pixel ratio and a floor of 0.7. There is no
+quality setting, because a quality setting is a question the player cannot
+answer any better than the game can.
+
+The policy lives in [`resolutionScaler.ts`](src/render/resolutionScaler.ts) with
+no renderer in it, because the part that is easy to get subtly wrong is the
+policy: a scaler that drops a step, measures the faster frames, climbs back,
+measures the slower ones and repeats for ever is much worse than one that
+settles slightly soft. What stops that here is a gap between the thresholds it
+drops at and climbs at, a median rather than a mean over a 45-frame window, a
+cooldown after every change, and discarding the window on a change so the new
+resolution is never judged on the old one's samples. Long frames are discarded
+outright — a tab waking up or a round rebuilding is not the frame rate.
+
+It is tested on the behaviour rather than the picture: that it settles, that it
+ignores a stutter, that it respects the floor and never climbs past the display.
+
+**This exists because the frame cost could not be measured honestly from
+outside.** Two attempts with `EXT_disjoint_timer_query_webgl2`, one of them
+alternating conditions to cancel drift, produced numbers whose variance was
+larger than the effect — 11.1 to 11.9ms at full resolution against 9.3 to
+12.4ms at seventy per cent, which says nothing. A renderer that measures itself
+on the machine it is actually running on does not have that problem.
+
+Alongside it, two reductions that need no measurement to justify: the light
+shafts are additive cones that cover much of the screen and blend rather than
+occlude, so there are half as many; and the fascia panels and light banks are
+merged into one mesh each rather than eight and fourteen.
+
+Cost: around 215 draw calls and 180,000 triangles for the whole arena, crowd
 included.
 
 What was actually wrong with the first version, in order of how much it mattered:

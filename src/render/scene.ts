@@ -6,6 +6,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { skyTexture, pitchTexture, netTexture, wallTexture } from './textures';
+import { ResolutionScaler } from './resolutionScaler';
 
 export interface Renderer {
   renderer: THREE.WebGLRenderer;
@@ -13,12 +14,19 @@ export interface Renderer {
   camera: THREE.PerspectiveCamera;
   /** Draws a frame. Goes through the bloom chain when it is on. */
   draw(): void;
+  /** Feeds the frame time to the adaptive resolution and resizes if it moved. */
+  pace(frameMs: number): void;
+  /** Current pixel ratio, for the debug readout. */
+  readonly pixelRatio: number;
   resize(): void;
 }
 
 export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // The starting point is the display's own ratio; the scaler takes it from
+  // here based on measured frame time.
+  const scaler = new ResolutionScaler(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(scaler.scale);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   // Filmic tone mapping rather than three's default clamp. Without it the
@@ -114,6 +122,12 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   function resize(): void {
     const w = canvas.clientWidth || window.innerWidth;
     const h = canvas.clientHeight || window.innerHeight;
+    // A hidden or detached canvas reports zero, and so does a window that has
+    // not laid out yet. Sizing the buffers to nothing there leaves a 0x0 draw
+    // target that renders nothing and never recovers, because no resize event
+    // follows. This used to be reachable only from a window resize; the
+    // adaptive resolution calls it during play, so it has to be safe.
+    if (w < 1 || h < 1) return;
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
     bloom.setSize(w, h);
@@ -127,7 +141,24 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     composer.render();
   }
 
-  return { renderer, scene, camera, draw, resize };
+  function pace(frameMs: number): void {
+    const next = scaler.sample(frameMs);
+    if (next === null) return;
+    renderer.setPixelRatio(next);
+    resize();
+  }
+
+  return {
+    renderer,
+    scene,
+    camera,
+    draw,
+    pace,
+    resize,
+    get pixelRatio() {
+      return scaler.scale;
+    },
+  };
 }
 
 /** Visual arena, built from the same layout the colliders use. */

@@ -261,20 +261,20 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   });
   const fasciaY = lower.base + lower.rows * lower.rise + s.fasciaHeight / 2;
   const fasciaOut = lower.inset + lower.rows * lower.tread;
+  const fasciaParts: THREE.BufferGeometry[] = [];
   for (const edge of edges) {
-    const panel = new THREE.Mesh(
-      new THREE.PlaneGeometry(edge.length + 240, s.fasciaHeight),
-      fasciaMat,
-    );
+    const geo = new THREE.PlaneGeometry(edge.length + 240, s.fasciaHeight);
     const angle = Math.atan2(edge.dir.y, edge.dir.x);
-    panel.position.set(
+    geo.rotateY(-angle + Math.PI / 2);
+    geo.translate(
       edge.mid.x + edge.normal.x * fasciaOut,
       fasciaY,
       edge.mid.y + edge.normal.y * fasciaOut,
     );
-    panel.rotation.y = -angle + Math.PI / 2;
-    group.add(panel);
+    fasciaParts.push(geo);
   }
+  group.add(new THREE.Mesh(mergeGeometries(fasciaParts, false), fasciaMat));
+  for (const geo of fasciaParts) geo.dispose();
 
   // --- roof --------------------------------------------------------------
   // Enclosing the volume is the single biggest thing: open to the sky, the
@@ -322,22 +322,30 @@ export function buildStadium(layout: ArenaLayout): Stadium {
     side: THREE.BackSide,
   });
   const bankY = roofY - 420;
+  const bankParts: THREE.BufferGeometry[] = [];
   for (const zs of [1, -1]) {
     for (let i = -3; i <= 3; i++) {
       const x = (i / 3) * layout.halfLength * 0.76;
       const z = zs * (layout.halfWidth + 520);
-      const bank = new THREE.Mesh(new THREE.BoxGeometry(900, 90, 260), lampMat);
-      bank.position.set(x, bankY, z);
-      group.add(bank);
+      const bank = new THREE.BoxGeometry(900, 90, 260);
+      bank.translate(x, bankY, z);
+      bankParts.push(bank);
 
-      // A shaft of light down onto the pitch. Additive and faint: it should
-      // read as air catching the light, not as a solid cone.
-      const shaft = new THREE.Mesh(new THREE.ConeGeometry(520, bankY * 0.82, 14, 1, true), shaftMat);
-      shaft.position.set(x * 0.7, bankY / 2, z * 0.55);
-      shaft.rotation.z = zs * -0.18;
-      group.add(shaft);
+      // A shaft of light down onto the pitch, on every other bank. Additive
+      // cones are nothing but overdraw — each one covers a large part of the
+      // screen and blends rather than occluding — and fourteen of them cost
+      // real fragment time for an effect that reads just as well from six.
+      if (i % 2 === 0) {
+        const shaft = new THREE.Mesh(new THREE.ConeGeometry(520, bankY * 0.82, 12, 1, true), shaftMat);
+        shaft.position.set(x * 0.7, bankY / 2, z * 0.55);
+        shaft.rotation.z = zs * -0.18;
+        group.add(shaft);
+      }
     }
   }
+
+  group.add(new THREE.Mesh(mergeGeometries(bankParts, false), lampMat));
+  for (const geo of bankParts) geo.dispose();
 
   // --- screens -----------------------------------------------------------
   // A scoreline hanging at each end. A stadium has screens, and this one can
