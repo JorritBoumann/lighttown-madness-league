@@ -398,3 +398,67 @@ describe('what the away lean costs', () => {
     expect(lap(0.5).worstOffNose).toBeGreaterThan(170);
   });
 });
+
+describe('low on a wall', () => {
+  /**
+   * The view while climbing the first few hundred units of a wall.
+   *
+   * On a wall "behind the car" points down it, so the camera wanted a position
+   * below the pitch, got clamped to the floor margin, and ended up standing on
+   * the grass pointing almost straight up at a dark wall. The frame went
+   * black — which is most of why driving up a wall felt like flying, since
+   * there was nothing in shot to say otherwise.
+   */
+  function onWall(carY: number): {
+    standoff: number;
+    degreesFromVertical: number;
+    carInFrame: boolean;
+  } {
+    const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1.6, 10, 40000);
+    const chase = new ChaseCamera(camera);
+    const car = { x: 0, y: carY, z: 4044 };
+    // Climbing, so travelling up the wall with the nose up it too.
+    const nose = new THREE.Vector3(0, 1, 0);
+    chase.snapTo(car, new THREE.Vector3(1, 0, 0));
+    for (let t = 0; t < 2; t += 1 / 60) {
+      chase.update(1 / 60, car, { x: 0, y: 1200, z: 0 }, nose, { x: 0, y: 95, z: 0 }, {
+        grounded: true,
+        normal: SIDE_WALL,
+      });
+    }
+    camera.updateMatrixWorld(true);
+    const view = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const b = new THREE.Vector3(car.x, car.y, car.z).project(camera);
+    return {
+      standoff: Math.round(4096 - camera.position.z),
+      degreesFromVertical:
+        Math.round((Math.acos(Math.max(-1, Math.min(1, view.dot(FLOOR)))) * 180) / Math.PI),
+      carInFrame: Math.abs(b.x) < 1 && Math.abs(b.y) < 1 && b.z < 1,
+    };
+  }
+
+  it('never drops below the floor margin', () => {
+    // The camera asks for a position below the pitch here, because on a wall
+    // "behind the car" points down it. It trades what the floor takes for
+    // standoff from the wall rather than being clamped flat onto the grass.
+    for (const y of [120, 200, 345]) {
+      expect(onWall(y).standoff).toBeGreaterThan(110);
+    }
+  });
+
+  it('looks up the wall, not at the sky', () => {
+    // Looking up the wall is correct — that is where the car is going. What was
+    // wrong was what it found there: the +z wall and the whole ceiling measured
+    // zero direct light, so a surface the car can drive on rendered black.
+    // That is fixed in the lighting, not here; this only pins the framing.
+    const low = onWall(345);
+    expect(low.degreesFromVertical).toBeGreaterThan(5);
+    expect(low.carInFrame).toBe(true);
+  });
+
+  it('keeps the car in shot all the way up', () => {
+    for (const y of [200, 345, 700, 1200, 1800]) {
+      expect(onWall(y).carInFrame).toBe(true);
+    }
+  });
+});

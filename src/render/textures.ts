@@ -279,6 +279,60 @@ export function goalHexTexture(): THREE.Texture {
   return finish(el, true);
 }
 
+/**
+ * The barrier above the hoardings.
+ *
+ * It was a 7% tint with nothing drawn on it, which is invisible — and a surface
+ * you cannot see is a surface you do not believe you are driving on. Climbing
+ * the wall felt like flying, because as far as the eye was concerned the car
+ * was in mid-air.
+ *
+ * The cells are left fully transparent rather than tinted. Looking across the
+ * arena the view passes through three or four of these, and a tint that reads
+ * correctly on one stacks into a white haze by the fourth; lattice lines
+ * stacked four deep are still just lines.
+ */
+export function fenceTexture(): THREE.Texture {
+  const S = 256;
+  const [el, ctx] = canvas(S, S);
+  ctx.clearRect(0, 0, S, S);
+
+  // Uprights, and fainter rails across them.
+  //
+  // Not a diamond lattice, which was the first attempt: driving along a wall
+  // you see it at a grazing angle, and at a grazing angle diagonals stretch
+  // into long streaks that read as light beams across the arena. Verticals
+  // stay vertical however oblique the view, which is why a real barrier's
+  // mullions are the thing you actually see.
+  ctx.strokeStyle = 'rgba(198,220,244,0.34)';
+  ctx.lineWidth = 3;
+  for (const u of [0.25, 0.5, 0.75]) {
+    ctx.beginPath();
+    ctx.moveTo(S * u, 0);
+    ctx.lineTo(S * u, S);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(190,212,238,0.22)';
+  ctx.lineWidth = 2;
+  for (const v of [0.33, 0.66]) {
+    ctx.beginPath();
+    ctx.moveTo(0, S * v);
+    ctx.lineTo(S, S * v);
+    ctx.stroke();
+  }
+
+  // The panel joint down each edge, brighter than the rest. In a real arena
+  // this is the seam between two sheets of glass.
+  ctx.strokeStyle = 'rgba(210,230,250,0.5)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(2, 0);
+  ctx.lineTo(2, S);
+  ctx.stroke();
+
+  return finish(el, true);
+}
+
 export function netTexture(): THREE.Texture {
   const S = 128;
   const [el, ctx] = canvas(S, S);

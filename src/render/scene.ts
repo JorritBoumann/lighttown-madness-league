@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { cfg } from '../config';
 import { buildArenaLayout, type ArenaLayout } from '../core/arenaLayout';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -11,6 +12,7 @@ import {
   netTexture,
   wallTexture,
   goalHexTexture,
+  fenceTexture,
   rampTexture,
   rampNormalMap,
   grassNormalMap,
@@ -84,6 +86,24 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   const fill = new THREE.DirectionalLight(0x7d93d6, cfg.render.fillIntensity);
   fill.position.set(-4000, 2600, -2600);
   scene.add(fill);
+
+  // Two more fills, aimed along the arena rather than down into it.
+  //
+  // Measured per surface: the key gives the floor 2.6 and the near side wall
+  // 1.0, and the far side wall and far end wall exactly 0 — they face away
+  // from it. Those are playable surfaces, so driving up one meant driving up
+  // something that rendered black. A real arena is lit from every side of the
+  // bowl; one sun is a thing that happens outdoors.
+  for (const at of [
+    [0, 1500, -9000],
+    [-9000, 1500, 0],
+    [0, 1500, 9000],
+    [9000, 1500, 0],
+  ] as [number, number, number][]) {
+    const wash = new THREE.DirectionalLight(0xdfe7f5, cfg.render.wallFillIntensity);
+    wash.position.set(at[0], at[1], at[2]);
+    scene.add(wash);
+  }
 
   let sun: THREE.DirectionalLight | null = new THREE.DirectionalLight(
     0xffeed6,
@@ -211,6 +231,14 @@ export function buildArenaMesh(): THREE.Group {
       map,
       normalMap: relief,
       normalScale: new THREE.Vector2(0.8, 0.8),
+      // The boards light themselves, using their own albedo as the emissive
+      // map so the bright marks glow and the dark panels stay dark. Arena
+      // hoardings are LED screens, so this is what they actually do — and it
+      // is what stops a playable surface rendering black: two of the four
+      // walls face away from the only strong light in the scene.
+      emissiveMap: map,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.42,
       roughness: 0.46,
       metalness: 0.06,
       side: THREE.DoubleSide,
@@ -224,16 +252,40 @@ export function buildArenaMesh(): THREE.Group {
   // walls, the near wall — and four layers of a 12% tint is an opaque white
   // sheet. A dark tint also keeps the crowd behind it legible, which is the
   // entire point of making the wall transparent.
-  const glassMat = new THREE.MeshStandardMaterial({
-    color: 0x6f8dae,
-    transparent: true,
-    opacity: 0.07,
-    roughness: 0.25,
-    metalness: 0,
-    envMapIntensity: 0.15,
-    side: THREE.FrontSide,
-    depthWrite: false,
-  });
+  // One material per distinct run length, so the lattice is the same size on a
+  // long wall as on a short one.
+  const glassMaterials = new Map<number, THREE.MeshStandardMaterial>();
+  const glassHeight = cfg.arena.ceiling - cfg.arena.hoardingHeight;
+  const glassMaterialFor = (lengthUnits: number): THREE.MeshStandardMaterial => {
+    const across = Math.max(1, Math.round(lengthUnits / cfg.arena.fenceCell));
+    const existing = glassMaterials.get(across);
+    if (existing) return existing;
+    const map = fenceTexture();
+    map.repeat.set(across, Math.max(1, Math.round(glassHeight / cfg.arena.fenceCell)));
+    const material = new THREE.MeshStandardMaterial({
+      map,
+      // The lattice is the only thing drawn; the cells are transparent, so
+      // looking through four walls gives four sets of lines rather than four
+      // sheets of tint.
+      alphaMap: map,
+      transparent: true,
+      opacity: 0.95,
+      color: 0xcfe0f2,
+      // Self-lit, because nothing in the arena lights this plane. The keys are
+      // aimed at the pitch, so up near the ceiling the lattice came out as dark
+      // lines on a dark background — present in the geometry and still
+      // invisible, which is the problem it exists to solve.
+      emissive: 0xaec6de,
+      emissiveIntensity: 0.4,
+      roughness: 0.25,
+      metalness: 0,
+      envMapIntensity: 0.15,
+      side: THREE.FrontSide,
+      depthWrite: false,
+    });
+    glassMaterials.set(across, material);
+    return material;
+  };
   // Ramps get their own material per (orientation, tile count). The old one
   // was a single flat pale colour, and because the ramp is a quarter of the
   // frame whenever the camera is low near a wall, that one fill was the
@@ -256,6 +308,11 @@ export function buildArenaMesh(): THREE.Group {
       map,
       normalMap: relief,
       normalScale: new THREE.Vector2(0.7, 0.7),
+      // A little self-lighting, as on the boards above it: the ramp on the far
+      // side of the arena faces away from the key too.
+      emissiveMap: map,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.2,
       roughness: 0.42,
       metalness: 0.1,
       side: THREE.DoubleSide,
@@ -296,20 +353,64 @@ export function buildArenaMesh(): THREE.Group {
   };
 
   const solidTop = cfg.arena.hoardingHeight;
+  // Support posts behind the barrier, collected and merged into one mesh.
+  const postParts: THREE.BufferGeometry[] = [];
   for (const panel of layout.panels) {
     // A plain wall is drawn as two bands; see `splitWallPanel`.
-    const bands: { height: number; centre: number; material: THREE.Material }[] =
-      splitWallPanel(panel, solidTop).map((band) => ({
+    const bands: { height: number; centre: number; kind: 'solid' | 'glass' }[] = [];
+    const split = splitWallPanel(panel, solidTop);
+    for (const band of split) bands.push(band);
+
+    // Posts up the glass, on the far side of it.
+    //
+    // These do most of the work of making the barrier visible: the lattice on
+    // the glass catches the light, but it is the uprights that give the plane a
+    // position in space. They sit behind the playing surface, where the real
+    // structure would be, so nothing a car drives on is obstructed.
+    for (const band of bands) {
+      if (band.kind !== 'glass') continue;
+      const alongX = panel.half.x > panel.half.z;
+      const longHalf = alongX ? panel.half.x : panel.half.z;
+      const thinHalf = alongX ? panel.half.z : panel.half.x;
+      const cy = Math.cos(panel.yaw);
+      const sy = Math.sin(panel.yaw);
+      const longDir = alongX
+        ? new THREE.Vector3(cy, 0, -sy)
+        : new THREE.Vector3(sy, 0, cy);
+      const outDir = alongX
+        ? new THREE.Vector3(sy, 0, cy)
+        : new THREE.Vector3(cy, 0, -sy);
+      // Away from the middle of the arena, whichever way the panel is turned.
+      if (outDir.x * panel.pos.x + outDir.z * panel.pos.z < 0) outDir.negate();
+
+      const spacing = cfg.arena.fenceCell;
+      const count = Math.max(1, Math.round((longHalf * 2) / spacing));
+      const standOff = thinHalf + cfg.arena.fencePostDepth / 2;
+      for (let i = 0; i <= count; i++) {
+        const t = (i / count - 0.5) * longHalf * 2;
+        const post = new THREE.BoxGeometry(14, band.height, 14);
+        post.translate(
+          panel.pos.x + longDir.x * t + outDir.x * standOff,
+          band.centre,
+          panel.pos.z + longDir.z * t + outDir.z * standOff,
+        );
+        postParts.push(post);
+      }
+    }
+
+    const bandMeshes: { height: number; centre: number; material: THREE.Material }[] = bands.map(
+      (band) => ({
         height: band.height,
         centre: band.centre,
         material:
           band.kind === 'solid'
             // Tiled to this run's own length, so nothing is stretched.
             ? wallMaterialFor(Math.max(panel.half.x, panel.half.z) * 2)
-            : glassMat,
-      }));
-    if (bands.length === 0) {
-      bands.push(
+            : glassMaterialFor(Math.max(panel.half.x, panel.half.z) * 2),
+      }),
+    );
+    if (bandMeshes.length === 0) {
+      bandMeshes.push(
           {
               height: panel.half.y * 2,
               centre: panel.pos.y,
@@ -328,7 +429,7 @@ export function buildArenaMesh(): THREE.Group {
       );
     }
 
-    for (const band of bands) {
+    for (const band of bandMeshes) {
       const geo = new THREE.BoxGeometry(panel.half.x * 2, band.height, panel.half.z * 2);
       const mesh = new THREE.Mesh(geo, band.material);
       mesh.position.set(panel.pos.x, band.centre, panel.pos.z);
@@ -341,6 +442,25 @@ export function buildArenaMesh(): THREE.Group {
       mesh.receiveShadow = panel.kind !== 'ceiling' && band.material === wallMat;
       group.add(mesh);
     }
+  }
+
+  if (postParts.length > 0) {
+    const posts = new THREE.Mesh(
+      mergeGeometries(postParts, false),
+      // Lit the same way and for the same reason: these are the uprights that
+      // give the barrier a position in space, and up at the ceiling there is no
+      // light to show them.
+      new THREE.MeshStandardMaterial({
+        color: 0x6b7c92,
+        emissive: 0x27303d,
+        emissiveIntensity: 1,
+        roughness: 0.5,
+        metalness: 0.5,
+      }),
+    );
+    posts.name = 'fence-posts';
+    group.add(posts);
+    for (const geo of postParts) geo.dispose();
   }
 
   group.add(buildPitch(layout));

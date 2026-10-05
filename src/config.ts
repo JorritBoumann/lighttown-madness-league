@@ -229,6 +229,17 @@ export const config = {
      *  wall is a playable surface for its whole height either way; this is
      *  only where you can see through it. */
     hoardingHeight: 620,
+    /**
+     * Cell size of the lattice on the barrier above the hoardings, and the
+     * spacing of the posts behind it.
+     *
+     * The barrier used to be a 7% tint with nothing drawn on it, which is to
+     * say invisible — and a surface you cannot see is a surface you do not
+     * believe you are driving on, so climbing the wall felt like flying.
+     */
+    fenceCell: 440,
+    /** How far the barrier's support posts stand behind the playing surface. */
+    fencePostDepth: 26,
     goalWidth: 1786,
     goalHeight: 642.775,
     goalDepth: 880,
@@ -726,6 +737,14 @@ export const config = {
      * no shadow in it reads as a diagram.
      */
     hemiIntensity: 0.46,
+    /**
+     * Four low fills aimed along the arena, so every wall gets something.
+     *
+     * The walls and the ceiling are driveable, and with a single key two of
+     * the four walls and the whole ceiling measured at zero direct light —
+     * climbing one meant climbing a surface that rendered black.
+     */
+    wallFillIntensity: 0.55,
     sunIntensity: 3.1,
     fillIntensity: 0.3,
 

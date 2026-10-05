@@ -34,26 +34,61 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
 
   const paintNormal = carNormalMap();
   paintNormal.repeat.set(2, 2);
+  const base = new THREE.Color(color);
+  // Deepened a little. The team colour at full strength made the car the
+  // palest thing in a dark arena, and left the accent below nothing to be
+  // brighter than; the accent carries the full colour instead.
   const paint = new THREE.MeshPhysicalMaterial({
-    color,
+    color: base.clone().multiplyScalar(0.72),
     normalMap: paintNormal,
     normalScale: new THREE.Vector2(0.7, 0.7),
-    roughness: 0.34,
-    metalness: 0.45,
+    roughness: 0.3,
+    metalness: 0.5,
     // Car paint is pigment under lacquer, and the two highlights that gives —
     // a broad one from the colour and a tight one from the clear coat — are
     // most of why a painted surface looks painted.
-    clearcoat: 0.85,
-    clearcoatRoughness: 0.12,
+    clearcoat: 0.9,
+    clearcoatRoughness: 0.1,
   });
-  const trim = new THREE.MeshStandardMaterial({ color: 0x1b2330, roughness: 0.45, metalness: 0.6 });
-  const glass = new THREE.MeshStandardMaterial({
-    color: 0x18222f,
-    roughness: 0.12,
-    metalness: 0.8,
+  // The same colour taken right down, for the lower half of the body.
+  //
+  // One flat panel from the sill to the shoulder is what made this read as a
+  // smooth toy: a real car breaks at the rocker, and that horizontal break is
+  // what gives the side a top and a bottom instead of a single bright face.
+  const paintLow = new THREE.MeshPhysicalMaterial({
+    color: base.clone().multiplyScalar(0.3),
+    roughness: 0.42,
+    metalness: 0.45,
+    clearcoat: 0.6,
+  });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x141922, roughness: 0.55, metalness: 0.45 });
+  // Glass, not a hole. At metalness 0.8 and roughness 0.12 this was a mirror,
+  // and a mirror at dusk reflects a dark sky — so the whole canopy came out as
+  // a black blob sitting on the roof, which is the single thing that stopped
+  // the car reading as a car.
+  const glass = new THREE.MeshPhysicalMaterial({
+    color: 0x2b3f58,
+    roughness: 0.08,
+    metalness: 0.25,
+    clearcoat: 1,
+    emissive: 0x16222f,
+    emissiveIntensity: 1,
+  });
+  // The team colour again, but emissive: a light bar and a stripe. The team has
+  // to be readable at a glance from the far end of the pitch, and a deepened
+  // body alone is not enough to carry that.
+  const accent = new THREE.MeshStandardMaterial({
+    color: base,
+    emissive: base,
+    // Low. With the arena's bloom at 0.62 an emissive of 0.9 blew the stripe
+    // and the light bar out to white, so the team colour they exist to carry
+    // was the one thing you could not read off them.
+    emissiveIntensity: 0.3,
+    roughness: 0.3,
   });
 
   const sill = -hy + h.height * 0.1;
+  const rocker = -hy + h.height * 0.3;
   const shoulder = -hy + h.height * 0.46;
   const roof = hy;
 
@@ -73,22 +108,91 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
   body.castShadow = true;
   g.add(body);
 
-  // Greenhouse: narrower than the body, which is what creates the shoulder
-  // step and stops the roof reading as a lid dropped on a tray.
-  const cabinShape = new THREE.Shape([
-    new THREE.Vector2(hx * 0.46, shoulder),
-    new THREE.Vector2(hx * 0.06, roof),
-    new THREE.Vector2(-hx * 0.4, roof),
-    new THREE.Vector2(-hx * 0.6, shoulder),
+  // The dark lower half, slightly proud of the bodyside so the break catches
+  // its own highlight.
+  const rockerShape = new THREE.Shape([
+    new THREE.Vector2(hx * 0.96, sill),
+    new THREE.Vector2(hx * 0.96, rocker),
+    new THREE.Vector2(-hx * 0.94, rocker),
+    new THREE.Vector2(-hx * 0.94, sill),
   ]);
-  const cabin = new THREE.Mesh(extrude(cabinShape, hz * 1.4, 2.5), glass);
+  const skirt = new THREE.Mesh(extrude(rockerShape, hz * 1.98, 2), paintLow);
+  g.add(skirt);
+
+  // Greenhouse: narrower than the body, which is what creates the shoulder
+  // step and stops the roof reading as a lid dropped on a tray. Shorter than it
+  // was, too, so there is a painted rear deck behind it rather than glass all
+  // the way to the spoiler.
+  const cabinShape = new THREE.Shape([
+    new THREE.Vector2(hx * 0.44, shoulder),
+    new THREE.Vector2(hx * 0.04, roof),
+    new THREE.Vector2(-hx * 0.3, roof),
+    new THREE.Vector2(-hx * 0.46, shoulder),
+  ]);
+  const cabin = new THREE.Mesh(extrude(cabinShape, hz * 1.36, 2.5), glass);
   cabin.castShadow = true;
   g.add(cabin);
+
+  // A painted roof cap over the glass, narrower again. Without it the canopy is
+  // glass on every face and there is no body colour above the shoulder at all.
+  const cap = new THREE.Mesh(
+    new THREE.BoxGeometry(hx * 0.34, h.height * 0.05, hz * 1.12),
+    paint,
+  );
+  cap.position.set(-hx * 0.13, roof + h.height * 0.01, 0);
+  cap.castShadow = true;
+  g.add(cap);
+
+  // Team colour where it can actually lie flat: a line along the rocker break
+  // down each flank, and one over the roof cap.
+  //
+  // The first version ran a stripe down the centre of the bonnet, and the
+  // bonnet is a slope — so the stripe floated above it at the nose and sank
+  // into it at the cowl, and all that showed was a short white dash. A flank
+  // is vertical and constant, which is why a side stripe is the one that works
+  // on a shape described as a side profile.
+  for (const zs of [1, -1]) {
+    const flank = new THREE.Mesh(
+      new THREE.BoxGeometry(hx * 1.72, h.height * 0.035, hz * 0.04),
+      accent,
+    );
+    flank.position.set(0, rocker, zs * hz * 0.99);
+    g.add(flank);
+  }
+  const roofStripe = new THREE.Mesh(
+    new THREE.BoxGeometry(hx * 0.32, h.height * 0.02, hz * 0.16),
+    accent,
+  );
+  roofStripe.position.set(-hx * 0.13, roof + h.height * 0.05, 0);
+  g.add(roofStripe);
+
+  // Wheel arches.
+  //
+  // An open tube a third again the tyre's radius, coaxial with the wheel. The
+  // body hides its inner half and what is left is a fender arc over the top of
+  // the wheel — which is the cue that was missing entirely. Without an arch a
+  // wheel reads as a button stuck on a smooth flank however well it is placed.
+  // Double-sided, because a half-shell seen from inside the arch would
+  // otherwise be invisible and the fender would vanish at some angles.
+  const archMat = new THREE.MeshStandardMaterial({
+    color: 0x141922,
+    roughness: 0.6,
+    metalness: 0.4,
+    side: THREE.DoubleSide,
+  });
 
   // Splitter at the nose, spoiler at the tail: they tell front from back.
   const splitter = new THREE.Mesh(new THREE.BoxGeometry(hx * 0.26, h.height * 0.07, hz * 1.8), trim);
   splitter.position.set(hx * 0.9, sill - h.height * 0.02, 0);
   g.add(splitter);
+
+  // Grille across the nose, under the lights.
+  const grille = new THREE.Mesh(
+    new THREE.BoxGeometry(hx * 0.05, h.height * 0.12, hz * 1.1),
+    trim,
+  );
+  grille.position.set(hx * 0.99, sill + h.height * 0.02, 0);
+  g.add(grille);
 
   const wing = new THREE.Mesh(new THREE.BoxGeometry(hx * 0.22, h.height * 0.06, hz * 1.7), trim);
   wing.position.set(-hx * 0.88, shoulder + h.height * 0.26, 0);
@@ -100,47 +204,101 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
     g.add(stay);
   }
 
-  // Lights: small, and emissive so they catch the bloom.
+  // Diffuser under the tail, with fins.
+  const diffuser = new THREE.Mesh(
+    new THREE.BoxGeometry(hx * 0.18, h.height * 0.14, hz * 1.5),
+    trim,
+  );
+  diffuser.position.set(-hx * 0.92, sill - h.height * 0.01, 0);
+  g.add(diffuser);
+  for (const i of [-1, 0, 1]) {
+    const fin = new THREE.Mesh(
+      new THREE.BoxGeometry(hx * 0.2, h.height * 0.16, hz * 0.05),
+      paintLow,
+    );
+    fin.position.set(-hx * 0.93, sill - h.height * 0.01, i * hz * 0.42);
+    g.add(fin);
+  }
+
+  // Lights: small, and emissive so they catch the bloom — but much less
+  // emissive than they were. At 1.8 with the arena's bloom now at 0.62 each
+  // headlight bloomed into a white blob bigger than the car's nose.
   const headMat = new THREE.MeshStandardMaterial({
     color: 0xfff6e0,
     emissive: 0xfff0cc,
-    emissiveIntensity: 1.8,
+    emissiveIntensity: 0.55,
   });
   for (const zs of [1, -1]) {
     const lamp = new THREE.Mesh(
-      new THREE.BoxGeometry(hx * 0.04, h.height * 0.1, hz * 0.3),
+      new THREE.BoxGeometry(hx * 0.04, h.height * 0.07, hz * 0.26),
       headMat,
     );
-    lamp.position.set(hx * 0.99, sill + h.height * 0.16, zs * hz * 0.58);
+    lamp.position.set(hx * 0.985, sill + h.height * 0.18, zs * hz * 0.6);
     g.add(lamp);
   }
-  const tail = new THREE.Mesh(
-    new THREE.BoxGeometry(hx * 0.03, h.height * 0.07, hz * 0.34),
-    new THREE.MeshStandardMaterial({ color: 0xff5a3c, emissive: 0xff3a18, emissiveIntensity: 1.2 }),
+  // A light bar across the tail in the team colour, which is what you actually
+  // read when a car is ahead of you.
+  const bar = new THREE.Mesh(
+    new THREE.BoxGeometry(hx * 0.03, h.height * 0.05, hz * 1.3),
+    accent,
   );
+  bar.position.set(-hx * 0.99, shoulder - h.height * 0.06, 0);
+  g.add(bar);
+  const tailMat = new THREE.MeshStandardMaterial({
+    color: 0xff5a3c,
+    emissive: 0xff3a18,
+    emissiveIntensity: 0.7,
+  });
   for (const zs of [1, -1]) {
-    const lamp = tail.clone();
-    lamp.position.set(-hx * 1.0, shoulder - h.height * 0.08, zs * hz * 0.6);
+    const lamp = new THREE.Mesh(
+      new THREE.BoxGeometry(hx * 0.03, h.height * 0.06, hz * 0.22),
+      tailMat,
+    );
+    lamp.position.set(-hx * 0.99, shoulder - h.height * 0.15, zs * hz * 0.66);
     g.add(lamp);
   }
 
   // Wheels. The x positions are the real suspension stations, so the wheelbase
-  // you see is the one the car steers on. The z is pushed out to the bodyside
-  // rather than the suspension's own 26-30, which sits well inside a hitbox 87
-  // wide: a wheel drawn there is hidden inside the bodywork.
+  // you see is the one the car steers on. The z is pushed out past the
+  // bodyside rather than the suspension's own 26-30, which sits well inside a
+  // hitbox 87 wide: a wheel drawn there is hidden inside the bodywork. It was
+  // at 0.88 of the half width, which is *inside* the body's own 0.97, so the
+  // tyres sat flush in the flank and read as buttons.
   const tyreMat = new THREE.MeshStandardMaterial({ color: 0x14171d, roughness: 0.95 });
   const rimMat = new THREE.MeshStandardMaterial({
-    color: 0xc2ccda,
-    roughness: 0.25,
-    metalness: 0.9,
+    color: 0xaab6c6,
+    roughness: 0.22,
+    metalness: 0.92,
   });
   for (const spec of [cfg.car.frontWheel, cfg.car.rearWheel]) {
-    const tyreGeo = new THREE.CylinderGeometry(spec.radius, spec.radius, spec.radius * 0.72, 18);
+    const tyreGeo = new THREE.CylinderGeometry(spec.radius, spec.radius, spec.radius * 0.78, 20);
     const rimGeo = new THREE.CylinderGeometry(
-      spec.radius * 0.5,
-      spec.radius * 0.5,
-      spec.radius * 0.76,
-      12,
+      spec.radius * 0.52,
+      spec.radius * 0.52,
+      spec.radius * 0.82,
+      14,
+    );
+    // Spokes, which is what makes a wheel turn visibly instead of being a disc.
+    const spokeGeo = new THREE.BoxGeometry(spec.radius * 1.3, spec.radius * 0.16, spec.radius * 0.86);
+    // The top half only.
+    //
+    // A full open tube showed as black crescents poking out past the tyre and
+    // below it — the arch's lower half reaches below the pitch, because the
+    // wheel centre is only one radius off the ground. A fender is the arc over
+    // the wheel and nothing else.
+    //
+    // After the `rotation.x` below, a point at angle t sits at car-y of -cos t,
+    // so the top of the wheel is at t = pi and the upper half runs from pi/2
+    // through to 3pi/2.
+    const archGeo = new THREE.CylinderGeometry(
+      spec.radius * 1.3,
+      spec.radius * 1.3,
+      spec.radius * 1.0,
+      16,
+      1,
+      true,
+      Math.PI / 2,
+      Math.PI,
     );
     for (const zs of [1, -1]) {
       const wheel = new THREE.Group();
@@ -148,9 +306,19 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
       tyre.castShadow = true;
       wheel.add(tyre);
       wheel.add(new THREE.Mesh(rimGeo, rimMat));
+      for (const turn of [0, Math.PI / 3, (2 * Math.PI) / 3]) {
+        const spoke = new THREE.Mesh(spokeGeo, rimMat);
+        spoke.rotation.y = turn;
+        wheel.add(spoke);
+      }
       wheel.rotation.x = Math.PI / 2;
-      wheel.position.set(spec.x, ground + spec.radius, zs * hz * 0.88);
+      wheel.position.set(spec.x, ground + spec.radius, zs * hz * 1.0);
       g.add(wheel);
+
+      const arch = new THREE.Mesh(archGeo, archMat);
+      arch.rotation.x = Math.PI / 2;
+      arch.position.set(spec.x, ground + spec.radius, zs * hz * 0.99);
+      g.add(arch);
     }
   }
 

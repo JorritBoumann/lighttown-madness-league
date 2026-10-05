@@ -158,6 +158,7 @@ export class ChaseCamera {
         .set(carPos.x, carPos.y, carPos.z)
         .addScaledVector(this.dir, distance)
         .addScaledVector(this.up, c.height);
+      this.tradeFloorForStandoff(this.desired);
 
       // How much the walls refuse. Measured on the position the camera *wants*
       // rather than on the one it ends up with: the lift below gives the
@@ -241,6 +242,7 @@ export class ChaseCamera {
           .set(carPos.x, carPos.y, carPos.z)
           .addScaledVector(heading, -distance)
           .addScaledVector(this.up, c.height);
+        this.tradeFloorForStandoff(this.followPos);
         const drop = Math.tan((-c.angle * Math.PI) / 180) * (distance + c.lookAhead);
         this.followLook
           .set(carPos.x, carPos.y, carPos.z)
@@ -283,6 +285,7 @@ export class ChaseCamera {
         .set(carPos.x, carPos.y, carPos.z)
         .addScaledVector(heading, -distance)
         .addScaledVector(this.up, c.height);
+      this.tradeFloorForStandoff(this.desired);
 
       const k = c.stiffness;
       this.pos.set(
@@ -329,6 +332,33 @@ export class ChaseCamera {
     }
   }
 
+  /**
+   * Trades whatever the floor takes off a camera position for standoff from
+   * the surface.
+   *
+   * On a wall "behind the car" points down it, so a car climbing the first few
+   * hundred units asks for a camera below the pitch. Clamped to the floor that
+   * camera stands on the grass pointing almost straight up at an unlit wall:
+   * the frame goes black, and driving up a wall feels like flying because
+   * nothing in shot says otherwise.
+   *
+   * The surface up vector is the wall's own normal, so pushing along it by the
+   * amount the floor stole moves the camera out over the pitch instead — the
+   * same distance from the car, looking back at it against the wall. On the
+   * floor the normal is world up and this is the lift it would have applied
+   * anyway.
+   *
+   * It has to happen here, on the position being asked for, rather than as a
+   * backstop after damping: the damp floors y itself, so by then the shortfall
+   * has already been thrown away and there is nothing left to measure.
+   */
+  private tradeFloorForStandoff(target: THREE.Vector3): void {
+    const sunk = cfg.camera.floorMargin - target.y;
+    if (sunk <= 0) return;
+    target.y = cfg.camera.floorMargin;
+    target.addScaledVector(this.up, sunk);
+  }
+
   /** A direction flattened against the camera's current up. */
   private flatten(v: THREE.Vector3): THREE.Vector3 {
     this.flat.copy(v).addScaledVector(this.up, -v.dot(this.up));
@@ -353,6 +383,7 @@ export class ChaseCamera {
     wanted: number,
   ): void {
     const c = cfg.camera;
+
     // Kept inside the building.
     //
     // Letting it sit outside instead was tried and is worse: the seating bowl
