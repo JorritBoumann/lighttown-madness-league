@@ -11,6 +11,8 @@ import { Controls } from './input/controls';
 import { emptyInput, type CarInput } from './input/types';
 import { Bot, type BotRole } from './ai/bot';
 import { createRenderer, buildArenaMesh, disposeArenaMesh, type Renderer } from './render/scene';
+import { buildStadium, type Stadium } from './render/stadium';
+import { buildArenaLayout } from './core/arenaLayout';
 import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
 import { ChaseCamera } from './render/chaseCamera';
 import { TransformInterpolator } from './core/interpolate';
@@ -18,7 +20,7 @@ import { Loop } from './core/loop';
 import { Hud } from './ui/hud';
 import { MatchHud } from './ui/matchHud';
 import { TweakPanel } from './ui/tweakPanel';
-import { Match, type GoalEvent, type MatchResult } from './state/match';
+import { Match, formatClock, type GoalEvent, type MatchResult } from './state/match';
 import { Run, type RunSummary } from './state/run';
 import { buildRound, type RoundSpec, type RoundOpponent } from './state/round';
 import { ConfigOverrides } from './state/configOverride';
@@ -64,6 +66,11 @@ export class Game {
   private readonly phys: PhysicsWorld;
   private arena: Arena;
   private arenaMesh: THREE.Group;
+  /**
+   * The building around the pitch. Built once: a round modifier can change the
+   * goals, which rebuilds the arena, but it never changes the stands.
+   */
+  private readonly stadium: Stadium;
   private readonly ball: Ball;
   private readonly pads: BoostPads;
   private readonly carBall = new CarBallInteraction();
@@ -133,6 +140,8 @@ export class Game {
     this.render = createRenderer(canvas);
     this.arenaMesh = buildArenaMesh();
     this.render.scene.add(this.arenaMesh);
+    this.stadium = buildStadium(buildArenaLayout());
+    this.render.scene.add(this.stadium.group);
     this.chase = new ChaseCamera(this.render.camera);
     this.ballMesh = createBallMesh();
     this.padVisuals = createBoostPadVisuals(this.pads.pads);
@@ -500,6 +509,13 @@ export class Game {
         this.ballMesh.position,
       );
     }
+
+    this.stadium.update(dt, {
+      blue: this.match.score[0],
+      orange: this.match.score[1],
+      clock: formatClock(this.match.clock),
+      label: this.roundLabel,
+    });
 
     this.handleHotkeys();
     this.hud.setDevice(this.controls.device);

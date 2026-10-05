@@ -144,6 +144,11 @@ export function buildArenaMesh(): THREE.Group {
     roughness: 0.9,
     metalness: 0.05,
   });
+  // The arena wall comes in two bands, and this is the change that stops the
+  // environment feeling empty. The playfield is a sealed box 2044 tall whose
+  // walls are driveable, so it used to present twenty metres of blank wall at
+  // exactly the height you look at while driving. Now only the bottom is
+  // solid; above it the wall is glass, and the crowd is right there behind it.
   const wallTex = wallTexture();
   wallTex.repeat.set(4, 1);
   const wallMat = new THREE.MeshStandardMaterial({
@@ -151,6 +156,21 @@ export function buildArenaMesh(): THREE.Group {
     roughness: 0.42,
     metalness: 0.08,
     side: THREE.DoubleSide,
+  });
+  // Front faces only, and barely there. Double-sided glass with depth writing
+  // off stacks every panel the view passes through — the far wall, both side
+  // walls, the near wall — and four layers of a 12% tint is an opaque white
+  // sheet. A dark tint also keeps the crowd behind it legible, which is the
+  // entire point of making the wall transparent.
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x6f8dae,
+    transparent: true,
+    opacity: 0.07,
+    roughness: 0.25,
+    metalness: 0,
+    envMapIntensity: 0.15,
+    side: THREE.FrontSide,
+    depthWrite: false,
   });
   const rampMat = new THREE.MeshStandardMaterial({
     color: 0x55637a,
@@ -181,25 +201,47 @@ export function buildArenaMesh(): THREE.Group {
     goal: goalBoxMat,
   };
 
+  const solidTop = cfg.arena.hoardingHeight;
   for (const panel of layout.panels) {
-    const geo = new THREE.BoxGeometry(panel.half.x * 2, panel.half.y * 2, panel.half.z * 2);
-    const mesh = new THREE.Mesh(geo, byKind[panel.kind ?? 'wall'] ?? wallMat);
-    mesh.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
-    if (panel.pitch) {
-      if (panel.axis === 'z') mesh.rotation.z = panel.pitch;
-      else mesh.rotation.x = panel.pitch;
-    } else {
-      mesh.rotation.y = panel.yaw;
+    // A plain wall is drawn as two panels: solid hoardings up to the top of the
+    // boards, glass from there to the ceiling. Everything else is unchanged.
+    const bands: { height: number; centre: number; material: THREE.Material }[] =
+      panel.kind === 'wall' && !panel.pitch && panel.half.y * 2 > solidTop * 1.5
+        ? [
+            { height: solidTop, centre: solidTop / 2, material: wallMat },
+            {
+              height: panel.half.y * 2 - solidTop,
+              centre: solidTop + (panel.half.y * 2 - solidTop) / 2,
+              material: glassMat,
+            },
+          ]
+        : [
+            {
+              height: panel.half.y * 2,
+              centre: panel.pos.y,
+              material: byKind[panel.kind ?? 'wall'] ?? wallMat,
+            },
+          ];
+
+    for (const band of bands) {
+      const geo = new THREE.BoxGeometry(panel.half.x * 2, band.height, panel.half.z * 2);
+      const mesh = new THREE.Mesh(geo, band.material);
+      mesh.position.set(panel.pos.x, band.centre, panel.pos.z);
+      if (panel.pitch) {
+        if (panel.axis === 'z') mesh.rotation.z = panel.pitch;
+        else mesh.rotation.x = panel.pitch;
+      } else {
+        mesh.rotation.y = panel.yaw;
+      }
+      mesh.receiveShadow = panel.kind !== 'ceiling' && band.material === wallMat;
+      group.add(mesh);
     }
-    mesh.receiveShadow = panel.kind !== 'ceiling';
-    group.add(mesh);
   }
 
   group.add(buildPitch(layout));
   // The ceiling is in shot most of the time. A grid on it keeps it reading as a
   // surface you could drive on rather than as empty space.
   group.add(buildCeilingGrid(layout));
-  group.add(buildStands(layout));
 
   for (const goal of layout.goals) {
     group.add(buildGoal(goal));
@@ -246,8 +288,11 @@ function buildPitch(layout: ArenaLayout): THREE.Mesh {
     new THREE.PlaneGeometry(layout.halfLength * 2, layout.halfWidth * 2),
     new THREE.MeshStandardMaterial({
       map: pitchTexture(layout, goalWidth),
-      roughness: 0.92,
-      metalness: 0.0,
+      // Some sheen, so the car and the lit goal mouths catch on it. A fully
+      // matte floor is the giveaway that a scene is untextured geometry.
+      roughness: 0.55,
+      metalness: 0.08,
+      envMapIntensity: 0.35,
     }),
   );
   mesh.rotation.x = -Math.PI / 2;
@@ -345,122 +390,51 @@ function buildGoal(goal: ArenaLayout['goals'][number]): THREE.Group {
   mouth.rotation.y = goal.sign > 0 ? -Math.PI / 2 : Math.PI / 2;
   group.add(mouth);
 
-  return group;
-}
-
-/**
- * Stands, crowd and floodlights.
- *
- * Without them the arena floats in a void, which is the single biggest thing
- * separating this from the references: a stadium is mostly the stadium. The
- * crowd is one instanced mesh of flat quads — forty thousand of them cost
- * nothing as instances and are indistinguishable from spectators at this
- * distance.
- */
-function buildStands(layout: ArenaLayout): THREE.Group {
-  const group = new THREE.Group();
-  group.name = 'stands';
-  const hl = layout.halfLength;
-  const hw = layout.halfWidth;
-  const tiers = 14;
-  const rise = 300;
-  const tread = 230;
-  const start = 160;
-  // The bowl starts at the top of the wall, not at floor level. Built from the
-  // floor up it is perfectly correct and completely invisible: the arena is a
-  // closed box, and the walls hide everything outside them.
-  const base = layout.ceiling;
-
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x323a49, roughness: 0.92 });
-  const seatGeo = new THREE.BoxGeometry(1, 1, 1);
-  const crowd: THREE.Matrix4[] = [];
-  const colours: THREE.Color[] = [];
-  // Muted clothing colours, not a rainbow: a crowd reads as a crowd because it
-  // is dense and slightly varied, and saturated specks look like confetti.
-  const palette = [0x1d2534, 0x2a3346, 0x4a2f2a, 0x24405a, 0x3a3f4b, 0x515b6b].map(
-    (c) => new THREE.Color(c),
+  // A surround around the mouth, lit in the end's colour.
+  //
+  // The goal is the thing you aim at from the far end of a pitch ten thousand
+  // units long, and a dark rectangle with thin posts disappears at that
+  // distance. The surround gives it a shape to find.
+  const surroundMat = new THREE.MeshStandardMaterial({
+    color: colour,
+    emissive: colour,
+    emissiveIntensity: 0.9,
+    roughness: 0.35,
+    metalness: 0.45,
+  });
+  const band = 70;
+  const surroundX = goal.x + goal.sign * 20;
+  // Lintel across the top, then an upright each side of the mouth.
+  const lintel = new THREE.Mesh(
+    new THREE.BoxGeometry(44, band, goal.width + band * 2),
+    surroundMat,
   );
-
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const scale = new THREE.Vector3(70, 90, 70);
-  const pos = new THREE.Vector3();
-
-  for (let t = 0; t < tiers; t++) {
-    const inset = start + t * tread;
-    const y = base + t * rise;
-    const spanX = hl + inset;
-    const spanZ = hw + inset;
-
-    // The step itself, as four slabs round the bowl.
-    for (const [sx, sz, px, pz] of [
-      [spanX * 2 + tread * 2, tread, 0, spanZ + tread / 2],
-      [spanX * 2 + tread * 2, tread, 0, -spanZ - tread / 2],
-      [tread, spanZ * 2, spanX + tread / 2, 0],
-      [tread, spanZ * 2, -spanX - tread / 2, 0],
-    ] as [number, number, number, number][]) {
-      // Solid from the bowl floor to this tier's lip rather than a thin step:
-      // a staircase of floating slabs lets the sky through between the rows
-      // and reads as scaffolding.
-      const height = y - base + rise;
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(sx, height, sz), concrete);
-      slab.position.set(px, base + height / 2 - rise, pz);
-      group.add(slab);
-    }
-
-    // Spectators along each step.
-    const step = 150;
-    for (let x = -spanX; x <= spanX; x += step) {
-      for (const zs of [1, -1]) {
-        pos.set(x, y + 45, zs * (spanZ + tread / 2));
-        m.compose(pos, q, scale);
-        crowd.push(m.clone());
-        colours.push(palette[(crowd.length * 7) % palette.length]!);
-      }
-    }
-    for (let z = -spanZ; z <= spanZ; z += step) {
-      for (const xs of [1, -1]) {
-        pos.set(xs * (spanX + tread / 2), y + 45, z);
-        m.compose(pos, q, scale);
-        crowd.push(m.clone());
-        colours.push(palette[(crowd.length * 11) % palette.length]!);
-      }
-    }
+  lintel.position.set(surroundX, goal.height + band / 2, 0);
+  group.add(lintel);
+  for (const zs of [1, -1]) {
+    const upright = new THREE.Mesh(
+      new THREE.BoxGeometry(44, goal.height + band, band),
+      surroundMat,
+    );
+    upright.position.set(surroundX, (goal.height + band) / 2, zs * (goal.width / 2 + band / 2));
+    group.add(upright);
   }
 
-  const seats = new THREE.InstancedMesh(
-    seatGeo,
-    new THREE.MeshStandardMaterial({ roughness: 0.85 }),
-    crowd.length,
+  // And a lit floor strip across the line, which is what tells you the ball
+  // actually crossed rather than rattled the frame.
+  const line = new THREE.Mesh(
+    new THREE.PlaneGeometry(goal.width, 90),
+    new THREE.MeshBasicMaterial({
+      color: colour,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    }),
   );
-  for (let i = 0; i < crowd.length; i++) {
-    seats.setMatrixAt(i, crowd[i]!);
-    seats.setColorAt(i, colours[i]!);
-  }
-  seats.instanceMatrix.needsUpdate = true;
-  if (seats.instanceColor) seats.instanceColor.needsUpdate = true;
-  group.add(seats);
-
-  // Floodlights at the corners, above the top tier.
-  // Well past white so the bloom pass catches them: at night the floodlights
-  // are the brightest thing in shot, and a rig lit to 1.0 looks like a grey
-  // box on a pole.
-  const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a3140, roughness: 0.75 });
-  const top = base + tiers * rise;
-  for (const xs of [1, -1]) {
-    for (const zs of [1, -1]) {
-      const x = xs * (hl + start + tiers * tread * 0.8);
-      const z = zs * (hw + start + tiers * tread * 0.8);
-      const mast = new THREE.Mesh(new THREE.CylinderGeometry(40, 60, top + 1500, 8), mastMat);
-      mast.position.set(x, (top + 1500) / 2, z);
-      group.add(mast);
-      const rig = new THREE.Mesh(new THREE.BoxGeometry(600, 160, 300), lampMat);
-      rig.position.set(x, top + 1500, z);
-      rig.lookAt(0, 0, 0);
-      group.add(rig);
-    }
-  }
+  line.rotation.x = -Math.PI / 2;
+  line.rotation.z = Math.PI / 2;
+  line.position.set(goal.x, 3, 0);
+  group.add(line);
 
   return group;
 }

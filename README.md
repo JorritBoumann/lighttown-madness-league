@@ -169,6 +169,63 @@ brighter than anything else. Night only works if the pitch is the brightest
 thing in the frame and the sky is genuinely dark behind it, so the floodlights
 are the light source rather than decoration.
 
+### Why it felt empty, and the one change that fixed it
+
+The first stadium pass added stands, a crowd and floodlights, and the arena
+still read as a lot with seating around it. The reason turned out to be
+structural rather than a matter of adding more detail.
+
+The playfield is a sealed box 2044 tall and its walls are driveable, so nothing
+can stand proud of them without implying collision that is not there. That left
+twenty metres of blank opaque wall at exactly the height the chase camera looks
+at, with the entire crowd hidden behind it. No amount of detail further out
+could fix that, because none of it was visible.
+
+So the wall is now two bands: solid hoardings up to 620, glass from there to the
+ceiling. It is still a driveable surface for its whole height — only its
+appearance changed — and the bowl starts at 520, just behind the boards. From a
+car on the floor you are now looking through glass at several thousand people.
+
+Three things followed from that:
+
+- **The volume is closed.** A roof with trusses and banks of lights hanging
+  under it, rather than four corner masts and open sky. Open to the sky, an
+  arena at night reads as a car park.
+- **The crowd is instanced and varied.** Around 14,500 spectators in two decks
+  across two instanced meshes, each nudged along its row and in depth, with
+  gangways cut through. Evenly spaced boxes of one size read as brickwork; the
+  gaps and the mismatched heights are what make a crowd. They carry a little
+  emissive, standing in for house lights over the seating — the four keys are
+  aimed at the pitch, so a crowd lit off them alone is nearly black at
+  gameplay distance, and a crowd you cannot see is the same as no crowd.
+- **A few hundred camera flashes** pop at random through the seating. The
+  cheapest trick available and the one that does the most: a still crowd reads
+  as scenery, a flickering one reads as people.
+
+Also from that pass: a hanging scoreboard at each end showing the live score and
+clock (repainted only when the text changes, not every frame), a lit surround
+around each goal mouth so it can be found from the far end of a pitch ten
+thousand units long, and painted reflections of the light banks on the floor.
+Those last ones are faked deliberately — a real reflection means drawing the
+scene again into a render target, and at the glancing angle the camera actually
+sees the floor, painted streaks read the same for nothing.
+
+Two mistakes worth recording, because both looked like the same bug:
+
+- **Double-sided glass with depth writing off stacks.** The view passes through
+  the near wall, both side walls and the far wall, and four layers of a 12 per
+  cent tint is an opaque white sheet. Front faces only, at 7 per cent.
+- **Fourteen double-sided additive light shafts do the same thing.** Each cone
+  is drawn twice over, and together they laid a pale sheet across the whole
+  pitch. Back faces only, at about a quarter of the opacity and half the width.
+
+The building is built once rather than per round: a modifier can change the
+goals, which rebuilds the arena, but it never changes the stands. Verified
+across five rebuilds — one arena, one stadium, texture count flat.
+
+Cost: around 225 draw calls and 180,000 triangles for the whole arena, crowd
+included.
+
 What was actually wrong with the first version, in order of how much it mattered:
 
 - **No stadium.** The arena floated in a void, and a stadium is mostly the
@@ -234,8 +291,8 @@ alone is a 2560 by 2048 canvas, so leaving the maps behind leaks megabytes per
 round — the sort of thing that only shows twenty rounds into a run, by which
 point nothing obviously points at the arena.
 
-The cost of all of it: about 106 draw calls and 60,000 triangles for a full
-arena, and roughly 17kB gzipped on the bundle for three's postprocessing passes.
+The bundle carries roughly 20kB gzipped for three's postprocessing and geometry
+utilities.
 
 ## Sound and effects
 

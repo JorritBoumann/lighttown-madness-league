@@ -188,6 +188,10 @@ export const config = {
     /** Radius of the curved transition from floor to wall, approximated with a
      *  45-degree ramp. */
     wallChamfer: 256,
+    /** How high the solid hoardings run before the wall turns to glass. The
+     *  wall is a playable surface for its whole height either way; this is
+     *  only where you can see through it. */
+    hoardingHeight: 620,
     goalWidth: 1786,
     goalHeight: 642.775,
     goalDepth: 880,
@@ -465,6 +469,44 @@ export const config = {
     master: 0.5,
     /** Boost thrust loop, relative to master. */
     boost: 0.18,
+  },
+
+  /**
+   * The building around the pitch. All of it is cosmetic: nothing here is
+   * collided with, and the bowl starts above the playfield's own walls.
+   */
+  stadium: {
+    /** Where the first row of seats sits. Low, so the crowd is visible through
+     *  the glass part of the arena wall from a car on the floor. */
+    lowerBase: 520,
+    lowerRows: 13,
+    lowerRise: 165,
+    lowerTread: 190,
+    /** How far outside the arena wall the first row stands. */
+    lowerInset: 130,
+    /** The lit band between the two decks, where the sponsor boards go. */
+    fasciaHeight: 360,
+    upperRows: 15,
+    upperRise: 215,
+    upperTread: 215,
+    /** Extra setback where the upper deck starts, for the concourse. */
+    upperStep: 420,
+    /** Spectators: spacing along a row, and their size. */
+    seatSpacing: 86,
+    seatWidth: 48,
+    seatHeight: 96,
+    /** How many gangways break each row up. */
+    gangways: 7,
+    /** Camera flashes in the crowd, and how often each one fires. */
+    flashes: 420,
+    flashRate: 0.22,
+    /** Height of the roof above the top row. */
+    roofClearance: 900,
+    /** Light shafts from the roof banks down onto the pitch. */
+    shaftOpacity: 0.012,
+    /** The hanging scoreboards at each end. */
+    screenWidth: 1500,
+    tunnelHeight: 560,
   },
 
   render: {

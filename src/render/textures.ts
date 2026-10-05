@@ -115,6 +115,34 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
     ctx.fill();
   }
 
+  // Reflections of the light banks overhead, painted on.
+  //
+  // A real reflection means drawing the scene a second time into a render
+  // target, which is a lot of frame for something the camera only ever sees at
+  // a glancing angle. Painted streaks under each bank read the same at this
+  // angle and cost nothing — and a floor with the lights in it is most of what
+  // makes an indoor arena look indoor.
+  const banks = 7;
+  for (const zs of [1, -1]) {
+    for (let i = 0; i < banks; i++) {
+      const bx = px(((i - (banks - 1) / 2) / ((banks - 1) / 2)) * hl * 0.76);
+      const bz = pz(zs * hw * 0.74);
+      const pool = ctx.createRadialGradient(bx, bz, 0, bx, bz, len(1500));
+      pool.addColorStop(0, 'rgba(196,222,255,0.20)');
+      pool.addColorStop(0.45, 'rgba(176,205,245,0.07)');
+      pool.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.save();
+      // Stretched towards the middle of the pitch, the way a reflection of a
+      // long bank of lights elongates away from you.
+      ctx.translate(bx, bz);
+      ctx.scale(1, 2.1);
+      ctx.translate(-bx, -bz);
+      ctx.fillStyle = pool;
+      ctx.fillRect(bx - len(1600), bz - len(1600), len(3200), len(3200));
+      ctx.restore();
+    }
+  }
+
   // Markings stay bright: they are painted lines catching floodlight, and they
   // are also how you read your position at speed.
   ctx.strokeStyle = 'rgba(238,246,255,0.80)';
@@ -285,4 +313,90 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   }
 
   return finish(el, true);
+}
+
+/**
+ * The fascia band between the two decks: lit panels in the house colours.
+ *
+ * A stadium's fascia is where the sponsor boards and the big lit letters go,
+ * and it is at exactly the height the chase camera looks at, so it carries a
+ * disproportionate amount of the "this is a venue" feeling.
+ */
+export function fasciaTexture(): THREE.Texture {
+  const W = 1024;
+  const H = 128;
+  const [el, ctx] = canvas(W, H);
+
+  ctx.fillStyle = '#131926';
+  ctx.fillRect(0, 0, W, H);
+
+  // Lit panels, alternating house colours with dark gaps between.
+  const panels = 12;
+  const colours = ['#2f6796', '#1a2130', '#b4532a', '#1a2130'];
+  for (let i = 0; i < panels; i++) {
+    const x = (i / panels) * W;
+    const w = W / panels;
+    ctx.fillStyle = colours[i % colours.length]!;
+    ctx.fillRect(x + w * 0.06, H * 0.18, w * 0.88, H * 0.64);
+  }
+
+  // A lit pipe along the top and bottom edge, which is what reads at distance.
+  ctx.fillStyle = 'rgba(190,215,255,0.9)';
+  ctx.fillRect(0, 0, W, H * 0.1);
+  ctx.fillRect(0, H * 0.9, W, H * 0.1);
+
+  const tex = finish(el, true);
+  tex.repeat.set(6, 1);
+  return tex;
+}
+
+/**
+ * A hanging scoreboard, redrawn when the score or clock changes.
+ *
+ * Returns the draw function rather than a finished texture: the caller owns
+ * when it is worth repainting, and repainting a canvas every frame to show a
+ * clock that ticks once a second is pure waste.
+ */
+export function screenCanvas(): {
+  texture: THREE.CanvasTexture;
+  draw: (info: { blue: number; orange: number; clock: string; label: string }) => void;
+} {
+  const W = 512;
+  const H = 256;
+  const [el, ctx] = canvas(W, H);
+  const texture = new THREE.CanvasTexture(el);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const draw = (info: { blue: number; orange: number; clock: string; label: string }): void => {
+    ctx.fillStyle = '#05080f';
+    ctx.fillRect(0, 0, W, H);
+
+    // Team blocks either side of the clock, same arrangement as the HUD so the
+    // screen and the scoreboard never disagree about which side is which.
+    ctx.fillStyle = '#1c4f7d';
+    ctx.fillRect(0, 56, 150, 120);
+    ctx.fillStyle = '#9c4524';
+    ctx.fillRect(W - 150, 56, 150, 120);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#eaf2ff';
+    ctx.font = 'bold 86px system-ui, sans-serif';
+    ctx.fillText(String(info.blue), 75, 118);
+    ctx.fillText(String(info.orange), W - 75, 118);
+
+    ctx.font = 'bold 64px system-ui, sans-serif';
+    ctx.fillText(info.clock, W / 2, 112);
+
+    ctx.font = '600 24px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(190,210,240,0.8)';
+    ctx.fillText(info.label.toUpperCase().slice(0, 28), W / 2, 206);
+
+    ctx.strokeStyle = 'rgba(150,185,230,0.5)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
+  };
+
+  draw({ blue: 0, orange: 0, clock: '0:00', label: '' });
+  return { texture, draw };
 }
