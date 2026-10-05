@@ -717,6 +717,21 @@ export const config = {
     /** How quickly the camera settles onto a new surface, per second. Fast
      *  enough to keep up with a car crossing the floor-wall seam at speed. */
     surfaceEase: 9,
+    /**
+     * How far ball cam leans towards the follow camera, 0 to 1.
+     *
+     * 0 is ball cam as usually defined: locked to the line through the ball,
+     * so steering moves nothing and a turn leaves you looking at the side of
+     * your own car. 1 ignores the ball entirely. Both the camera's position
+     * and what it looks at are blended by this — moving one without the other
+     * makes the view worse, not better.
+     */
+    ballCamFollow: 0.82,
+    /** Heading sweep, in radians a second, that counts as a full turn. */
+    turnReference: 1.0,
+    /** How fast the lean comes on, and how slowly it lets go. */
+    turnAttack: 6,
+    turnRelease: 1.6,
     /** How far from the car towards the ball the ball cam looks. */
     ballBias: 0.75,
     /** How far the look target is lifted off a wall, so the car sits in the

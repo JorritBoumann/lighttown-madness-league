@@ -47,6 +47,12 @@ export class ChaseCamera {
   private readonly surfaceUp = new THREE.Vector3(0, 1, 0);
   private readonly flat = new THREE.Vector3();
   private readonly probe = new THREE.Vector3();
+  private readonly followPos = new THREE.Vector3();
+  private readonly followLook = new THREE.Vector3();
+  /** Last frame's flattened heading, for measuring how hard the car is turning. */
+  private readonly lastHeading = new THREE.Vector3(1, 0, 0);
+  /** Eased 0-to-1 measure of how hard the car is turning. */
+  private turning = 0;
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {}
 
@@ -84,6 +90,22 @@ export class ChaseCamera {
       this.surfaceUp.copy(surface.normal).normalize();
     }
     this.up.lerp(this.surfaceUp, Math.min(1, c.surfaceEase * dt)).normalize();
+
+    // How hard the car is turning, from how fast its heading is sweeping.
+    //
+    // Taken from the heading rather than the steering input because the camera
+    // is not given the input, and because what matters is the car actually
+    // changing direction — a wheel turned against a slide is not a turn.
+    const nose = this.flatten(carForward);
+    if (dt > 0) {
+      const swept = Math.acos(Math.max(-1, Math.min(1, nose.dot(this.lastHeading)))) / dt;
+      const want = Math.min(1, swept / c.turnReference);
+      // Eases up quickly and falls away slowly, so the view does not snap back
+      // the instant the wheel straightens mid-corner.
+      const rate = want > this.turning ? c.turnAttack : c.turnRelease;
+      this.turning += (want - this.turning) * Math.min(1, rate * dt);
+    }
+    this.lastHeading.copy(nose);
 
     // How far the surface has tilted away from the floor: 0 driving the pitch,
     // 1 on a wall or the ceiling. Ball cam has to give way as this rises.
@@ -153,6 +175,44 @@ export class ChaseCamera {
           .addScaledVector(this.up, c.wallLookLift);
         this.tmp2.lerp(this.tmp, wallness);
       }
+      // Lean the whole framing towards the follow camera.
+      //
+      // Ball cam is locked to the line through the ball, so steering moves
+      // nothing and you end up looking at the side of your own car with no
+      // idea where the nose points — measured at 110 degrees off the nose
+      // through a steady turn. Leaning helps only if the *look target* comes
+      // with it: moving the camera behind the car while it still stares at the
+      // ball makes the angle worse, not better, which is what a first attempt
+      // at this did.
+      // Only while actually turning. Held at a fixed lean the camera trades
+      // away the ball for a heading you did not ask about; driving straight,
+      // ball cam framing is the right framing and this is zero.
+      const follow = c.ballCamFollow * this.turning;
+      if (follow > 0.001) {
+        const heading = this.flatten(carForward);
+        this.followPos
+          .set(carPos.x, carPos.y, carPos.z)
+          .addScaledVector(heading, -distance)
+          .addScaledVector(this.up, c.height);
+        const drop = Math.tan((-c.angle * Math.PI) / 180) * (distance + c.lookAhead);
+        this.followLook
+          .set(carPos.x, carPos.y, carPos.z)
+          .addScaledVector(this.up, -drop)
+          .addScaledVector(heading, c.lookAhead);
+        this.desired.lerp(this.followPos, follow);
+        this.tmp2.lerp(this.followLook, follow);
+        // The position was damped above against the unblended target, so it is
+        // re-damped here against the blended one. Both halves of the framing
+        // have to move together or the camera looks somewhere its position
+        // does not justify.
+        this.pos.set(
+          damp(this.pos.x, this.desired.x, k, dt),
+          damp(this.pos.y, Math.max(this.desired.y, 40), k, dt),
+          damp(this.pos.z, this.desired.z, k, dt),
+        );
+      }
+
+
       this.look.set(
         damp(this.look.x, this.tmp2.x, k, dt),
         damp(this.look.y, this.tmp2.y, k, dt),

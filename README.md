@@ -106,6 +106,34 @@ Two interchangeable ways to change any of it, both live:
 The throttle and steering curves are lookup tables rather than single numbers,
 so they live in the file rather than on a slider.
 
+## Ball cam while steering
+
+Ball cam is locked to the line through the ball, so steering moves the camera
+not at all: turn across the pitch and you are looking at the side of your own
+car with no idea where the nose points. Measured on a steady circle, the view
+sat **113 degrees** off the nose — past sideways.
+
+It now leans towards the follow camera while the car is actually turning, and
+lets go as it straightens. The lean is gated on the heading sweeping rather than
+on the steering input, because a wheel turned against a slide is not a turn.
+
+Two things this took to get right:
+
+- **Both halves of the framing have to move together.** Leaning the camera's
+  position towards the car while it still looks at the ball makes the angle
+  *worse*, not better — 42 degrees to 54 on the first attempt. The position and
+  the look target are blended by one number.
+- **The trade is a cliff, not a slope.** Blending the two framings is strongly
+  non-linear: most of the angular change arrives in the last stretch, and just
+  past it the ball leaves the screen. At 0.70 the view is 96 degrees off the
+  nose with the ball always visible; at 0.82, 81 degrees and still always
+  visible; at 0.90, 55 degrees but the ball is gone for a third of a tight
+  corner. The default sits at the last point where nothing is given up.
+
+That is a 32 degree improvement and the ball never leaves the frame, which is
+the honest size of it: it is better, not solved. Aligning the view properly with
+the nose means a follow camera, which is what `T` has always been for.
+
 ## The camera on a wall
 
 Driving up a wall used to put the view behind the wall, looking in through it.

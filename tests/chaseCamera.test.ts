@@ -144,3 +144,98 @@ describe('chase camera inside the arena', () => {
     expect(camera.position.z).toBeCloseTo(withSurface.camera.position.z, 3);
   });
 });
+
+/**
+ * Ball cam while steering.
+ *
+ * Ball cam is locked to the line through the ball, so steering moves nothing
+ * and a turn leaves you looking at the side of your own car with no idea where
+ * the nose is pointing — measured at 113 degrees off the nose through a steady
+ * turn, which is past sideways. It now leans towards the follow camera while
+ * the car is actually turning, and lets go again when it straightens.
+ */
+describe('ball cam while turning', () => {
+  /** A car driving a steady circle with the ball parked off to one side. */
+  function circle(follow: number, radius = 700): { offNose: number; ballSeen: number } {
+    const restore = cfg.camera.ballCamFollow;
+    cfg.camera.ballCamFollow = follow;
+    const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1.6, 10, 40000);
+    const chase = new ChaseCamera(camera);
+    const ball = { x: -1800, y: 95, z: 1800 };
+    const at = (t: number) => {
+      const a = t * 1.1;
+      return {
+        pos: { x: Math.cos(a) * radius, y: 40, z: Math.sin(a) * radius },
+        nose: new THREE.Vector3(-Math.sin(a), 0, Math.cos(a)).normalize(),
+        vel: { x: -Math.sin(a) * 1200, y: 0, z: Math.cos(a) * 1200 },
+      };
+    };
+    chase.snapTo(at(0).pos, at(0).nose);
+
+    const angles: number[] = [];
+    let seen = 0;
+    let total = 0;
+    for (let t = 0; t < 6; t += 1 / 60) {
+      const s = at(t);
+      chase.update(1 / 60, s.pos, s.vel, s.nose, ball, {
+        grounded: true,
+        normal: new THREE.Vector3(0, 1, 0),
+      });
+      if (t > 3) {
+        camera.updateMatrixWorld(true);
+        const view = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        view.y = 0;
+        view.normalize();
+        angles.push((Math.acos(Math.max(-1, Math.min(1, view.dot(s.nose)))) * 180) / Math.PI);
+        const b = new THREE.Vector3(ball.x, ball.y, ball.z).project(camera);
+        if (Math.abs(b.x) < 1 && Math.abs(b.y) < 1 && b.z < 1) seen++;
+        total++;
+      }
+    }
+    cfg.camera.ballCamFollow = restore;
+    angles.sort((a, b) => a - b);
+    return {
+      offNose: Math.round(angles[Math.floor(angles.length / 2)]!),
+      ballSeen: Math.round((seen / Math.max(1, total)) * 100),
+    };
+  }
+
+  it('turns the view towards the nose while cornering', () => {
+    const locked = circle(0).offNose;
+    const leaning = circle(cfg.camera.ballCamFollow).offNose;
+    // Locked ball cam measures 113 degrees off the nose here; the lean brings
+    // it to about 81. The gap is the whole feature.
+    expect(locked).toBeGreaterThan(100);
+    expect(leaning).toBeLessThan(locked - 20);
+  });
+
+  it('does not give up the ball to do it', () => {
+    // The trade is sharp: leaning further aligns the nose quickly but loses
+    // the ball — at 0.9 it is gone for a third of a tight corner. The default
+    // sits at the point where it is still always in frame.
+    expect(circle(cfg.camera.ballCamFollow).ballSeen).toBe(100);
+    expect(circle(cfg.camera.ballCamFollow, 2000).ballSeen).toBe(100);
+  });
+
+  it('leaves the view alone when driving straight', () => {
+    // Driving straight, ball cam framing is the right framing: the lean is
+    // gated on the heading actually sweeping, so it reads zero here.
+    const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1.6, 10, 40000);
+    const chase = new ChaseCamera(camera);
+    const nose = new THREE.Vector3(1, 0, 0);
+    const ball = { x: 3000, y: 95, z: 1200 };
+    let x = -2000;
+    chase.snapTo({ x, y: 40, z: 0 }, nose);
+    for (let t = 0; t < 4; t += 1 / 60) {
+      x += 1200 / 60;
+      chase.update(1 / 60, { x, y: 40, z: 0 }, { x: 1200, y: 0, z: 0 }, nose, ball, {
+        grounded: true,
+        normal: new THREE.Vector3(0, 1, 0),
+      });
+    }
+    camera.updateMatrixWorld(true);
+    const b = new THREE.Vector3(ball.x, ball.y, ball.z).project(camera);
+    expect(Math.abs(b.x)).toBeLessThan(1);
+    expect(Math.abs(b.y)).toBeLessThan(1);
+  });
+});
