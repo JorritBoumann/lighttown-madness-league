@@ -38,23 +38,42 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   // Far out on purpose. The camera can sit ten thousand units from the far
   // goal, so fog that starts anywhere near the pitch turns the whole far half
   // into haze — which is exactly what the first attempt did.
-  scene.fog = new THREE.Fog(0xaec6dc, 26000, 52000);
+  scene.fog = new THREE.Fog(0x0b1120, 22000, 48000);
 
   // Near and far have to suit a pitch 10240 long.
   const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1, 10, 40000);
   camera.position.set(-2000, 400, 0);
 
-  // Sky above, pitch bounce below.
-  const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x3f5a35, 0.32);
+  // Night. There is no sun, so the floodlights are the light: four cool keys
+  // angled in from above the corners, which is also why the shadows under a
+  // car point outward from the middle of the pitch rather than all one way.
+  //
+  // Only one of them casts a shadow. Four shadow maps is four extra passes
+  // over the scene for a second and third shadow nobody reads at this camera
+  // distance, and the one that does cast is the brightest.
+  const hemi = new THREE.HemisphereLight(0x3d5578, 0x121a14, 0.5);
   scene.add(hemi);
 
-  // Low fill from the far end, so the car reads against the floor at both ends.
-  const fill = new THREE.DirectionalLight(0x9fc4f0, 0.35);
-  fill.position.set(-4000, 2000, -2000);
-  scene.add(fill);
+  const corners: [number, number, number][] = [
+    [1, 1, 1.0],
+    [-1, 1, 0.55],
+    [1, -1, 0.6],
+    [-1, -1, 0.45],
+  ];
+  let sun: THREE.DirectionalLight | null = null;
+  for (const [xs, zs, strength] of corners) {
+    const lamp = new THREE.DirectionalLight(0xdce8ff, 2.5 * strength);
+    lamp.position.set(xs * 5200, 5200, zs * 4400);
+    scene.add(lamp);
+    if (!sun) sun = lamp;
+  }
 
-  const sun = new THREE.DirectionalLight(0xfff4e2, 2.3);
-  sun.position.set(2500, 5000, 2000);
+  // A warm bounce off the pitch, so the undersides of cars are not black.
+  const bounce = new THREE.DirectionalLight(0x6f8f72, 0.22);
+  bounce.position.set(0, -1000, 0);
+  scene.add(bounce);
+
+  sun = sun!;
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   // Tight to the pitch rather than loose around it: the same map stretched
@@ -120,7 +139,7 @@ export function buildArenaMesh(): THREE.Group {
   // surface laid just above it, so the pitch can be repainted when a modifier
   // changes the goals without touching the collider geometry's mesh.
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x24562e,
+    color: 0x16351d,
     roughness: 0.95,
     metalness: 0.0,
   });
@@ -133,7 +152,7 @@ export function buildArenaMesh(): THREE.Group {
     side: THREE.DoubleSide,
   });
   const rampMat = new THREE.MeshStandardMaterial({
-    color: 0xc3cedd,
+    color: 0x55637a,
     roughness: 0.38,
     metalness: 0.12,
     side: THREE.DoubleSide,
@@ -141,9 +160,9 @@ export function buildArenaMesh(): THREE.Group {
   // The ceiling is a playable surface but sits between the camera and the pitch,
   // so it is drawn as a faint shell rather than a solid lid.
   const ceilingMat = new THREE.MeshStandardMaterial({
-    color: 0x8f9aa9,
+    color: 0x5d6b82,
     transparent: true,
-    opacity: 0.04,
+    opacity: 0.05,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
@@ -351,13 +370,13 @@ function buildStands(layout: ArenaLayout): THREE.Group {
   // closed box, and the walls hide everything outside them.
   const base = layout.ceiling;
 
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x8e99a8, roughness: 0.9 });
+  const concrete = new THREE.MeshStandardMaterial({ color: 0x323a49, roughness: 0.92 });
   const seatGeo = new THREE.BoxGeometry(1, 1, 1);
   const crowd: THREE.Matrix4[] = [];
   const colours: THREE.Color[] = [];
   // Muted clothing colours, not a rainbow: a crowd reads as a crowd because it
   // is dense and slightly varied, and saturated specks look like confetti.
-  const palette = [0x2f3b52, 0x47536b, 0x8d4a3c, 0x3f6b8a, 0x6a6f7d, 0xa8b2c0].map(
+  const palette = [0x1d2534, 0x2a3346, 0x4a2f2a, 0x24405a, 0x3a3f4b, 0x515b6b].map(
     (c) => new THREE.Color(c),
   );
 
@@ -422,8 +441,11 @@ function buildStands(layout: ArenaLayout): THREE.Group {
   group.add(seats);
 
   // Floodlights at the corners, above the top tier.
-  const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff6dd });
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0x6d7786, roughness: 0.7 });
+  // Well past white so the bloom pass catches them: at night the floodlights
+  // are the brightest thing in shot, and a rig lit to 1.0 looks like a grey
+  // box on a pole.
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a3140, roughness: 0.75 });
   const top = base + tiers * rise;
   for (const xs of [1, -1]) {
     for (const zs of [1, -1]) {

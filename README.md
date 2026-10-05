@@ -158,10 +158,16 @@ screen keeps it, so you can see the state you are returning to.
 
 ## The look
 
-No image files. Everything on screen is geometry or a texture painted onto a
-canvas at startup, the same decision as the synthesised audio, which is also why
-the pitch can be repainted when a round narrows the nets rather than leaving
-markings where the posts used to be.
+A floodlit arena at night. No image files: everything on screen is geometry or
+a texture painted onto a canvas at startup, the same decision as the synthesised
+audio, which is also why the pitch can be repainted when a round narrows the
+nets rather than leaving markings where the posts used to be.
+
+Night is the deliberate choice, and it is not the same thing as the first
+version being dark. That one was dark *and* flat — one navy everywhere, nothing
+brighter than anything else. Night only works if the pitch is the brightest
+thing in the frame and the sky is genuinely dark behind it, so the floodlights
+are the light source rather than decoration.
 
 What was actually wrong with the first version, in order of how much it mattered:
 
@@ -176,14 +182,23 @@ What was actually wrong with the first version, in order of how much it mattered
   corner arcs, and a tinted area at each end so which way you are attacking is
   readable without looking at the scoreboard.
 - **Flat lighting.** There was no tone mapping, so the bright end crushed to
-  white and everything else read as the same navy. ACES filmic tone mapping, a
-  sky gradient used as the environment map — metal with nothing to reflect is
-  just its base colour, however many lights you point at it — and a shadow
-  camera fitted to the pitch rather than loosely around it.
+  white and everything else read as the same navy. ACES filmic tone mapping now,
+  a night sky gradient used as the environment map — metal with nothing to
+  reflect is just its base colour, however many lights you point at it — and a
+  shadow camera fitted to the pitch rather than loosely around it.
+
+  There is no sun. Four cool keys angle in from above the corners where the
+  floodlight masts are, which is why a car's shadows splay outward from the
+  middle of the pitch instead of all lying the same way. Only the brightest of
+  the four casts a shadow: four shadow maps is four extra passes over the scene
+  for a second and third shadow nobody reads at this camera distance. The rigs
+  themselves are drawn at pure white so the bloom catches them — a floodlight
+  lit to the same value as a wall looks like a grey box on a pole.
 - **The car was a box.** See below.
-- **Nothing glowed.** A bloom pass, thresholded at 0.78: low enough and the
-  white pitch markings start to glow, which reads as a bug rather than an
-  effect.
+- **Nothing glowed.** A bloom pass, thresholded at 0.72. Lower and the white
+  pitch markings start to glow, which reads as a bug rather than an effect; at
+  night the threshold has less room above it, so the lit hoardings are kept
+  below white on purpose to stop them competing with the floodlights.
 
 **The car took three attempts, and the first two failed the same way.** Placing
 the corners of a hull by hand is easy to get wrong in a way that is hard to

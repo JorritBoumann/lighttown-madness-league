@@ -37,13 +37,27 @@ function finish(el: HTMLCanvasElement, repeat = false): THREE.Texture {
 export function skyTexture(): THREE.Texture {
   const [el, ctx] = canvas(64, 256);
   const g = ctx.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0.0, '#2a4a86');
-  g.addColorStop(0.32, '#6f9fd8');
-  g.addColorStop(0.49, '#cfe2f5');
-  g.addColorStop(0.52, '#8fa0ad');
-  g.addColorStop(1.0, '#3b4450');
+  // Night. Dark overhead, with a lift towards the horizon where the
+  // floodlights catch the air above the bowl — a flat black sky reads as a
+  // missing background rather than as night.
+  g.addColorStop(0.0, '#04070e');
+  g.addColorStop(0.34, '#0a1324');
+  g.addColorStop(0.47, '#1b2b45');
+  g.addColorStop(0.5, '#243550');
+  g.addColorStop(0.54, '#12192a');
+  g.addColorStop(1.0, '#070a12');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 256);
+
+  // A scatter of stars in the upper half. Faint on purpose: they should be
+  // something you notice on a replay, not a planetarium.
+  ctx.fillStyle = 'rgba(226,236,255,0.5)';
+  for (let i = 0; i < 90; i++) {
+    const x = (i * 29.7) % 64;
+    const y = (i * 17.3) % 110;
+    ctx.fillRect(x, y, 1, 1);
+  }
+
   const tex = finish(el);
   tex.mapping = THREE.EquirectangularReflectionMapping;
   return tex;
@@ -67,14 +81,17 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // Mowing stripes, across the short axis the way a roller would run.
   const stripes = 16;
   for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? '#2f6b39' : '#285f33';
+    ctx.fillStyle = i % 2 ? '#24542d' : '#1d4826';
     ctx.fillRect((i / stripes) * W, 0, W / stripes + 1, H);
   }
 
   // A vignette, so the middle of the pitch is not a flat slab of one colour.
-  const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.62);
-  vg.addColorStop(0, 'rgba(255,255,255,0.05)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.30)');
+  // Stronger falloff than daylight wants: under floodlights the middle of the
+  // pitch is the brightest thing in the arena and the corners fall away.
+  const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.66);
+  vg.addColorStop(0, 'rgba(214,236,255,0.10)');
+  vg.addColorStop(0.55, 'rgba(0,0,0,0.12)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.46)');
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, W, H);
 
@@ -82,8 +99,8 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // the cue that tells you which way you are attacking at a glance.
   const mouth = goalWidth / 2;
   for (const [sign, tint] of [
-    [1, 'rgba(255,112,67,0.20)'],
-    [-1, 'rgba(66,165,245,0.20)'],
+    [1, 'rgba(255,112,67,0.26)'],
+    [-1, 'rgba(66,165,245,0.26)'],
   ] as [number, string][]) {
     const depth = len(1700);
     ctx.fillStyle = tint;
@@ -92,7 +109,9 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
     ctx.fill();
   }
 
-  ctx.strokeStyle = 'rgba(245,250,255,0.82)';
+  // Markings stay bright: they are painted lines catching floodlight, and they
+  // are also how you read your position at speed.
+  ctx.strokeStyle = 'rgba(238,246,255,0.80)';
   ctx.lineCap = 'round';
 
   // Halfway line and centre circles.
@@ -106,7 +125,7 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
     ctx.arc(px(0), pz(0), len(r), 0, Math.PI * 2);
     ctx.stroke();
   }
-  ctx.fillStyle = 'rgba(245,250,255,0.82)';
+  ctx.fillStyle = 'rgba(238,246,255,0.80)';
   ctx.beginPath();
   ctx.arc(px(0), pz(0), len(50), 0, Math.PI * 2);
   ctx.fill();
@@ -221,14 +240,14 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   const H = 256;
   const [el, ctx] = canvas(W, H);
 
-  ctx.fillStyle = '#dde5ef';
+  ctx.fillStyle = '#3c4555';
   ctx.fillRect(0, 0, W, H);
 
   // Upper face, very slightly cooler than the lower, so the two bands read as
   // separate surfaces rather than one.
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, 'rgba(255,255,255,0.5)');
-  g.addColorStop(1, 'rgba(120,140,165,0.25)');
+  g.addColorStop(0, 'rgba(150,175,205,0.22)');
+  g.addColorStop(1, 'rgba(8,12,20,0.35)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
@@ -239,17 +258,19 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   // Low contrast on purpose. Alternating white and near-black at this density
   // reads as a zebra crossing and pulls the eye off the pitch, which is the
   // opposite of what detail on a wall is for.
-  const accent = team === 'orange' ? '#b56a46' : team === 'blue' ? '#4a7ba3' : '#8d99a8';
+  // The hoardings are the lit band on an otherwise dark wall, which is what
+  // gives a sense of speed as it goes past.
+  const accent = team === 'orange' ? '#b4532a' : team === 'blue' ? '#2f6796' : '#6c7a8d';
   for (let i = 0; i < panels; i++) {
-    ctx.fillStyle = i % 2 ? accent : '#e4ebf3';
+    ctx.fillStyle = i % 2 ? accent : '#9aa8bb';
     ctx.fillRect((i / panels) * W, boardTop, W / panels + 1, boardH);
   }
-  ctx.fillStyle = 'rgba(70,82,100,0.5)';
+  ctx.fillStyle = 'rgba(12,18,28,0.6)';
   ctx.fillRect(0, boardTop - H * 0.015, W, H * 0.015);
   ctx.fillRect(0, boardTop + boardH, W, H * 0.015);
 
   // Kickplate: scuffed dark band at floor level, where a car actually hits.
-  ctx.fillStyle = '#5a6373';
+  ctx.fillStyle = '#242c38';
   ctx.fillRect(0, H * 0.86, W, H * 0.14);
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
   for (let i = 0; i < 120; i++) {

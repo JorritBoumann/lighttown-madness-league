@@ -469,13 +469,13 @@ export const config = {
 
   render: {
     /** Tone-mapping exposure. Higher is brighter before the filmic rolloff. */
-    exposure: 0.92,
+    exposure: 1.02,
     /** How much the sky gradient lights the scene through reflections. */
-    environmentIntensity: 0.4,
+    environmentIntensity: 0.22,
     /** Bloom: threshold is the brightness a pixel needs before it blooms. */
-    bloomStrength: 0.42,
-    bloomRadius: 0.5,
-    bloomThreshold: 0.78,
+    bloomStrength: 0.62,
+    bloomRadius: 0.62,
+    bloomThreshold: 0.72,
   },
 
   camera: {
