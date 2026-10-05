@@ -400,3 +400,208 @@ export function screenCanvas(): {
   draw({ blue: 0, orange: 0, clock: '0:00', label: '' });
   return { texture, draw };
 }
+
+/**
+ * Turns a height field into a normal map.
+ *
+ * This is the piece that was missing. Every material in here was a flat colour,
+ * so the only surface detail anywhere was geometry — which is why the car and
+ * ball read as shapes rather than objects however carefully they were built. A
+ * normal map is the cheapest detail there is: it costs no triangles and adds
+ * the panel seams, grain and wear that make a surface look like a material.
+ *
+ * The caller draws greyscale height; this differences it into a normal. Normal
+ * maps carry vectors rather than colour, so the texture is left in linear
+ * space — tagging one as sRGB bends every normal in it.
+ */
+export function normalMapFromHeight(
+  size: number,
+  strength: number,
+  drawHeight: (ctx: CanvasRenderingContext2D, s: number) => void,
+): THREE.Texture {
+  const [, heightCtx] = canvas(size, size);
+  heightCtx.fillStyle = '#808080';
+  heightCtx.fillRect(0, 0, size, size);
+  drawHeight(heightCtx, size);
+
+  const src = heightCtx.getImageData(0, 0, size, size).data;
+  const [outEl, outCtx] = canvas(size, size);
+  const out = outCtx.createImageData(size, size);
+
+  // Wrapped sampling, so a tiling map has no seam down its edges.
+  const at = (x: number, y: number): number => {
+    const xi = ((x % size) + size) % size;
+    const yi = ((y % size) + size) % size;
+    return src[(yi * size + xi) * 4]! / 255;
+  };
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // Sobel, which is less noisy on hand-drawn height than a plain
+      // difference of neighbours.
+      const dx =
+        at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1) -
+        (at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1));
+      const dy =
+        at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1) -
+        (at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1));
+
+      const nx = -dx * strength;
+      const ny = -dy * strength;
+      const len = Math.hypot(nx, ny, 1);
+      const i = (y * size + x) * 4;
+      out.data[i] = ((nx / len) * 0.5 + 0.5) * 255;
+      out.data[i + 1] = ((ny / len) * 0.5 + 0.5) * 255;
+      out.data[i + 2] = ((1 / len) * 0.5 + 0.5) * 255;
+      out.data[i + 3] = 255;
+    }
+  }
+  outCtx.putImageData(out, 0, 0);
+
+  const tex = new THREE.CanvasTexture(outEl);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/** Hexagons, as a height field: the ball's panels pressed in at the seams. */
+function hexHeight(ctx: CanvasRenderingContext2D, s: number, cells: number): void {
+  const r = s / cells;
+  ctx.fillStyle = '#000000';
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = Math.max(2, s / 220);
+  ctx.lineJoin = 'round';
+  for (let row = -1; row * r * 1.5 < s + r; row++) {
+    for (let col = -1; col * r * Math.sqrt(3) < s + r; col++) {
+      const cx = col * r * Math.sqrt(3) + (row % 2 ? (r * Math.sqrt(3)) / 2 : 0);
+      const cy = row * r * 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+        const x = cx + Math.cos(a) * r * 0.9;
+        const y = cy + Math.sin(a) * r * 0.9;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+}
+
+/** The ball's seams, as a normal map matching its painted panels. */
+export function ballNormalMap(): THREE.Texture {
+  return normalMapFromHeight(512, 6, (ctx, s) => hexHeight(ctx, s, 14));
+}
+
+/** The ball's roughness: panels polished, seams dull. */
+export function ballRoughnessMap(): THREE.Texture {
+  const S = 512;
+  const [el, ctx] = canvas(S, S);
+  ctx.fillStyle = '#3a3a3a';
+  ctx.fillRect(0, 0, S, S);
+  // Seams are where dirt sits, so they scatter more than the panel faces.
+  ctx.strokeStyle = '#c8c8c8';
+  ctx.lineWidth = 5;
+  hexHeight(ctx, S, 14);
+  const tex = new THREE.CanvasTexture(el);
+  tex.colorSpace = THREE.NoColorSpace;
+  return tex;
+}
+
+/**
+ * Car paint: panel seams, a vent, and the faint orange-peel of a sprayed
+ * surface.
+ *
+ * Tiled across the bodywork rather than laid out per panel, which a real model
+ * would do with proper UVs. At the distance the chase camera sits, what reads
+ * is that the surface has grain and creases at all.
+ */
+export function carNormalMap(): THREE.Texture {
+  return normalMapFromHeight(512, 3.2, (ctx, s) => {
+    // Shallow creases along the body.
+    ctx.strokeStyle = '#2a2a2a';
+    ctx.lineWidth = s / 160;
+    for (const y of [0.3, 0.52, 0.74]) {
+      ctx.beginPath();
+      ctx.moveTo(0, s * y);
+      ctx.bezierCurveTo(s * 0.3, s * (y - 0.03), s * 0.7, s * (y + 0.03), s, s * y);
+      ctx.stroke();
+    }
+    // A vent: a run of short slats.
+    ctx.lineWidth = s / 110;
+    for (let i = 0; i < 6; i++) {
+      const x = s * (0.62 + i * 0.045);
+      ctx.beginPath();
+      ctx.moveTo(x, s * 0.36);
+      ctx.lineTo(x - s * 0.03, s * 0.46);
+      ctx.stroke();
+    }
+    // Orange peel. Sprayed paint is never perfectly flat, and a perfectly
+    // flat specular highlight is one of the things that reads as untextured.
+    for (let i = 0; i < 2600; i++) {
+      const x = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+      const y = (Math.sin(i * 78.233) * 12345.6789) % 1;
+      const v = 128 + (((i * 37) % 11) - 5) * 3;
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.fillRect(Math.abs(x) * s, Math.abs(y) * s, 3, 3);
+    }
+  });
+}
+
+/** Fine grain for the pitch, tiled many times over. */
+export function floorNormalMap(): THREE.Texture {
+  return normalMapFromHeight(256, 1.4, (ctx, s) => {
+    for (let i = 0; i < 9000; i++) {
+      const x = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
+      const y = Math.abs((Math.sin(i * 39.3468) * 24634.6345) % 1) * s;
+      const v = 128 + (((i * 17) % 9) - 4) * 10;
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.fillRect(x, y, 2, 2);
+    }
+  });
+}
+
+/**
+ * The boundary wall in relief: the hoarding panels proud of the wall, a ridge
+ * where the boards meet it, and the kickplate scuffed.
+ *
+ * The wall is the surface that fills the view at eye level while driving, so
+ * it earns its own map more than anything else here does.
+ */
+export function wallNormalMap(): THREE.Texture {
+  return normalMapFromHeight(512, 4.5, (ctx, s) => {
+    const boardTop = s * 0.44;
+    const boardH = s * 0.3;
+
+    // The hoardings stand proud, so their top and bottom edges catch light.
+    ctx.fillStyle = '#b4b4b4';
+    ctx.fillRect(0, boardTop, s, boardH);
+
+    // Seams between the panels.
+    ctx.strokeStyle = '#3c3c3c';
+    ctx.lineWidth = Math.max(2, s / 180);
+    const panels = 10;
+    for (let i = 0; i <= panels; i++) {
+      const x = (i / panels) * s;
+      ctx.beginPath();
+      ctx.moveTo(x, boardTop);
+      ctx.lineTo(x, boardTop + boardH);
+      ctx.stroke();
+    }
+
+    // Kickplate, dented where cars actually hit it.
+    ctx.fillStyle = '#6e6e6e';
+    ctx.fillRect(0, s * 0.86, s, s * 0.14);
+    for (let i = 0; i < 70; i++) {
+      const x = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
+      const y = s * 0.86 + Math.abs((Math.sin(i * 78.233) * 1234.5) % 1) * s * 0.14;
+      const v = 90 + ((i * 29) % 70);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, s / 70, s / 180, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+}

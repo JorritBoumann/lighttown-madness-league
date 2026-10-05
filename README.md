@@ -267,6 +267,44 @@ The building is built once rather than per round: a modifier can change the
 goals, which rebuilds the arena, but it never changes the stands. Verified
 across five rebuilds — one arena, one stadium, texture count flat.
 
+### Surface detail, made rather than downloaded
+
+Every material here was a flat colour, which is the real reason the car and ball
+read as shapes rather than objects: with no surface detail, geometry is all the
+eye has to go on, and no amount of geometry substitutes for a surface that
+looks like a material.
+
+The fix is generated normal maps. `normalMapFromHeight` takes a greyscale height
+field drawn on a canvas and differences it into a normal map with a Sobel
+kernel, sampling wrapped so a tiling map has no seam. It costs no triangles.
+
+- **The ball** gets its panel seams in relief, a roughness map that leaves the
+  panels polished and the seams dull, and a clear coat. This is the single
+  biggest change: the ball is the object the eye tracks for the whole match.
+- **The car** gets body creases, a vent, and the faint orange peel of sprayed
+  paint, under a clear coat. Car paint is pigment under lacquer, and the two
+  highlights that gives — broad from the colour, tight from the coat — are most
+  of why a painted surface looks painted. The map tiles across the bodywork
+  rather than being laid out per panel, which a real model would do with proper
+  UVs; at chase-camera distance what reads is that the surface has grain at all.
+- **The wall** gets its hoardings standing proud with lit edges, and a scuffed
+  kickplate. It earns a map more than anything else, being the surface that
+  fills the view at eye level while driving.
+- **The floor** gets fine grain so a glancing highlight breaks up instead of
+  sliding across a sheet of glass.
+
+One figure worth keeping: grain has to be smaller than the things standing on
+it. Tiled 48 times across a pitch this wide, each speck is the size of a car and
+the floor reads as crumpled paper; at 130 it reads as a surface.
+
+Normal maps carry vectors, not colour, so they are left in linear space —
+tagging one as sRGB bends every normal in it.
+
+**What this does not do** is replace a modelled car. An artist's bodywork is out
+of reach of code written by hand, and the references that look better than this
+use downloaded Rocket League models. Those are Epic's, so they are not an option
+here whatever they look like.
+
 ### Holding the frame rate
 
 The renderer measures its own frame time and moves the render resolution to

@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { cfg } from '../config';
 import type { BoostPad } from '../physics/boostPads';
-import { ballTexture } from './textures';
+import {
+  ballTexture,
+  ballNormalMap,
+  ballRoughnessMap,
+  carNormalMap,
+} from './textures';
 
 /**
  * The car.
@@ -27,7 +32,20 @@ export function createCarMesh(color = 0x4fc3f7): THREE.Group {
   const ground = -(hy + cfg.car.rideHeight);
   const g = new THREE.Group();
 
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.5 });
+  const paintNormal = carNormalMap();
+  paintNormal.repeat.set(2, 2);
+  const paint = new THREE.MeshPhysicalMaterial({
+    color,
+    normalMap: paintNormal,
+    normalScale: new THREE.Vector2(0.7, 0.7),
+    roughness: 0.34,
+    metalness: 0.45,
+    // Car paint is pigment under lacquer, and the two highlights that gives —
+    // a broad one from the colour and a tight one from the clear coat — are
+    // most of why a painted surface looks painted.
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.12,
+  });
   const trim = new THREE.MeshStandardMaterial({ color: 0x1b2330, roughness: 0.45, metalness: 0.6 });
   const glass = new THREE.MeshStandardMaterial({
     color: 0x18222f,
@@ -176,14 +194,23 @@ export function createBallMesh(): THREE.Mesh {
     // Smooth, not faceted: the flat shading was hiding the fact that this is
     // the one object on the pitch the eye tracks continuously.
     new THREE.SphereGeometry(cfg.ball.radius, 32, 24),
-    new THREE.MeshStandardMaterial({
+    new THREE.MeshPhysicalMaterial({
       map: ballTexture(),
+      // The seams in relief, and dull where the panels are polished. This is
+      // what stops it reading as a painted sphere.
+      normalMap: ballNormalMap(),
+      normalScale: new THREE.Vector2(1.1, 1.1),
+      roughnessMap: ballRoughnessMap(),
+      // A lacquer over the panels, which is what gives the tight highlight
+      // that tells you the thing has a surface.
+      clearcoat: 0.6,
+      clearcoatRoughness: 0.2,
       // A little self-lit: at half-pitch the ball is only about fifteen pixels
       // across, and it has to stay findable against the pitch.
       emissive: 0x33405c,
       emissiveIntensity: 0.3,
-      roughness: 0.22,
-      metalness: 0.2,
+      roughness: 0.6,
+      metalness: 0.1,
     }),
   );
   mesh.castShadow = true;

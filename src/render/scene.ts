@@ -5,7 +5,14 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { skyTexture, pitchTexture, netTexture, wallTexture } from './textures';
+import {
+  skyTexture,
+  pitchTexture,
+  netTexture,
+  wallTexture,
+  floorNormalMap,
+  wallNormalMap,
+} from './textures';
 import { ResolutionScaler } from './resolutionScaler';
 
 export interface Renderer {
@@ -182,8 +189,12 @@ export function buildArenaMesh(): THREE.Group {
   // solid; above it the wall is glass, and the crowd is right there behind it.
   const wallTex = wallTexture();
   wallTex.repeat.set(4, 1);
+  const wallRelief = wallNormalMap();
+  wallRelief.repeat.set(4, 1);
   const wallMat = new THREE.MeshStandardMaterial({
     map: wallTex,
+    normalMap: wallRelief,
+    normalScale: new THREE.Vector2(0.9, 0.9),
     roughness: 0.42,
     metalness: 0.08,
     side: THREE.DoubleSide,
@@ -280,8 +291,11 @@ export function buildArenaMesh(): THREE.Group {
     // the cue you read when the pitch markings are out of shot.
     const endTex = wallTexture(goal.sign > 0 ? 'orange' : 'blue');
     endTex.repeat.set(1, 1);
+    const endRelief = wallNormalMap();
     const endMat = new THREE.MeshStandardMaterial({
       map: endTex,
+      normalMap: endRelief,
+      normalScale: new THREE.Vector2(0.9, 0.9),
       roughness: 0.42,
       metalness: 0.08,
       side: THREE.DoubleSide,
@@ -319,6 +333,19 @@ function buildPitch(layout: ArenaLayout): THREE.Mesh {
     new THREE.PlaneGeometry(layout.halfLength * 2, layout.halfWidth * 2),
     new THREE.MeshStandardMaterial({
       map: pitchTexture(layout, goalWidth),
+      // Grain, tiled small and often. The markings and light pools live in the
+      // big albedo; this is the fine texture underneath them, which is what
+      // makes a glancing highlight break up instead of sliding across a sheet
+      // of glass.
+      normalMap: (() => {
+        const grain = floorNormalMap();
+        // Tiled small and often: at 48 tiles across a pitch this wide each
+        // speck is the size of a car and the floor reads as crumpled paper.
+        // The grain wants to be below the size of anything on it.
+        grain.repeat.set(130, 104);
+        return grain;
+      })(),
+      normalScale: new THREE.Vector2(0.2, 0.2),
       // Some sheen, so the car and the lit goal mouths catch on it. A fully
       // matte floor is the giveaway that a scene is untextured geometry.
       roughness: 0.55,
