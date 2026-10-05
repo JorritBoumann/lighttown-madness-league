@@ -575,7 +575,11 @@ export class Car {
     const steerAngle =
       (inp.drift ? this.powerslideCurve.at(absAlong) : this.steerCurve.at(absAlong)) *
       (inp.drift ? c.powerslideSteerGain : 1);
-    let yawRate = (absAlong * Math.tan(steerAngle * inp.steer)) / c.steerWheelbase;
+    // Negative because a positive steer input means "turn right", and turning
+    // right is a rotation about the *negative* surface normal: about +n the
+    // nose swings towards the car's left. Without this the game steered
+    // backwards for a human, and only for a human — see core/axes.ts.
+    let yawRate = -(absAlong * Math.tan(steerAngle * inp.steer)) / c.steerWheelbase;
     yawRate *= m.turnRate;
     if (alongSpeed < 0) yawRate = -yawRate;
     // Standing still with no throttle should not let the car pivot on the spot.
@@ -603,13 +607,15 @@ export class Car {
       // Config values are angular accelerations in rad/s^2: direct, predictable,
       // and independent of the inertia tensor.
       //
-      // Signs, derived from the axes above: spin about the driver's right pitches
-      // the nose down, so stick-forward is positive; spin about the nose rolls
-      // the car to its left, so rolling right is negative.
+      // Signs, derived from the axes in core/axes.ts. Spin about the driver's
+      // right pitches the nose *up* and spin about the roof yaws it *left*, so
+      // both of those are negated to match the input conventions — positive
+      // pitch is nose down, positive steer is nose right. Spin about the nose
+      // rolls the car to its right, which is already the convention.
       const air = this.mods.airControl;
-      this.angvel.addScaledVector(this.right, inp.pitch * c.airPitchAccel * air * dt);
-      this.angvel.addScaledVector(this.up, inp.steer * c.airYawAccel * air * dt);
-      this.angvel.addScaledVector(this.fwd, -inp.roll * c.airRollAccel * air * dt);
+      this.angvel.addScaledVector(this.right, -inp.pitch * c.airPitchAccel * air * dt);
+      this.angvel.addScaledVector(this.up, -inp.steer * c.airYawAccel * air * dt);
+      this.angvel.addScaledVector(this.fwd, inp.roll * c.airRollAccel * air * dt);
 
       // Per-axis damping, applied only where there is no input. Holding an axis
       // stays crisp; releasing it settles.
@@ -714,11 +720,14 @@ export class Car {
     this.body.setLinvel({ x: this.vel.x, y: this.vel.y, z: this.vel.z }, true);
 
     // Spin about the axis perpendicular to the kick: pitch for forward and back,
-    // roll for sideways.
+    // roll for sideways. Negated for the same reason the air controls are — a
+    // rotation about the car's right pitches the nose up, and a front flip goes
+    // the other way. It also keeps a sideways dodge rolling the way it is
+    // travelling instead of against it.
     const axis = this.tmp2
       .set(0, 0, 0)
-      .addScaledVector(this.right, fx)
-      .addScaledVector(this.fwd, -fz)
+      .addScaledVector(this.right, -fx)
+      .addScaledVector(this.fwd, fz)
       .normalize();
     this.body.setAngvel(
       { x: axis.x * c.dodgeTorque, y: axis.y * c.dodgeTorque, z: axis.z * c.dodgeTorque },

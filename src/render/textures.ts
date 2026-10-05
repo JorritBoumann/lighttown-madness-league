@@ -36,31 +36,57 @@ function finish(el: HTMLCanvasElement, repeat = false): THREE.Texture {
  * its own base colour, however many lights are pointed at it.
  */
 export function skyTexture(): THREE.Texture {
-  const [el, ctx] = canvas(64, 256);
-  const g = ctx.createLinearGradient(0, 0, 0, 256);
-  // Daylight, open to the sky. Deep overhead, paling towards the horizon, with
-  // the ground half kept dim so the environment map does not wash the pitch.
-  g.addColorStop(0.0, '#2f6fc4');
-  g.addColorStop(0.3, '#6ba4e2');
-  g.addColorStop(0.46, '#b9d9f4');
-  g.addColorStop(0.5, '#d8e8f6');
-  g.addColorStop(0.54, '#8ea4b6');
-  g.addColorStop(1.0, '#44525e');
+  const W = 256;
+  const H = 256;
+  const [el, ctx] = canvas(W, H);
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  // Dusk, open to the sky: deep indigo overhead falling through violet into a
+  // warm band at the horizon, with the ground half kept dim so the
+  // environment map does not light the pitch from below.
+  //
+  // Daylight was the wrong call. A blue sky at noon lights everything evenly,
+  // so nothing in the arena can glow — the LED ribbon, the roof strips and the
+  // boost pads were all competing with a lit sky and lost. Dusk gives them
+  // something to be brighter than.
+  g.addColorStop(0.0, '#1b1636');
+  g.addColorStop(0.16, '#2c2150');
+  g.addColorStop(0.3, '#4a2c5e');
+  g.addColorStop(0.4, '#7e3f5f');
+  g.addColorStop(0.46, '#c06a52');
+  g.addColorStop(0.49, '#e89a5c');
+  g.addColorStop(0.5, '#f0b478');
+  g.addColorStop(0.52, '#4a3f48');
+  g.addColorStop(0.72, '#26212e');
+  g.addColorStop(1.0, '#191620');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 256);
+  ctx.fillRect(0, 0, W, H);
 
-  // A scatter of cloud, soft enough to read as sky rather than as texture.
-  for (let i = 0; i < 26; i++) {
-    const x = (i * 29.7) % 64;
-    const y = 12 + ((i * 17.3) % 92);
-    const r = 4 + ((i * 7) % 9);
-    const cloud = ctx.createRadialGradient(x, y, 0, x, y, r);
-    cloud.addColorStop(0, 'rgba(255,255,255,0.5)');
-    cloud.addColorStop(1, 'rgba(255,255,255,0)');
+  // Cloud, as flattened bands rather than round puffs. Dusk cloud is lit from
+  // underneath and stretched along the horizon; circles read as daytime
+  // cumulus whatever colour they are painted.
+  for (let i = 0; i < 48; i++) {
+    const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
+    const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
+    const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
+    const x = r0 * W;
+    const y = 18 + r1 * 104;
+    const rx = 18 + r2 * 46;
+    const ry = rx * (0.12 + r1 * 0.14);
+    // Warmer and brighter the nearer the horizon, which is where the last of
+    // the light is coming from.
+    const warmth = Math.min(1, Math.max(0, (y - 20) / 100));
+    const cloud = ctx.createRadialGradient(x, y, 0, x, y, rx);
+    const a = 0.1 + warmth * 0.3;
+    cloud.addColorStop(0, `rgba(${Math.round(190 + warmth * 60)},${Math.round(150 + warmth * 50)},${Math.round(160 + warmth * 20)},${a})`);
+    cloud.addColorStop(1, 'rgba(120,100,140,0)');
     ctx.fillStyle = cloud;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(1, ry / rx);
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.arc(0, 0, rx, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   }
 
   const tex = finish(el);
@@ -83,21 +109,52 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   const pz = (z: number) => (z + hw) * sz;
   const len = (uu: number) => uu * sx;
 
-  // Mowing stripes, the way a roller leaves them. Alternating bands passing
+  // Mowing bands, the way a roller leaves them. Alternating bands passing
   // under the car are also a large part of how fast the game feels.
+  //
+  // Darker and more saturated than the daylight version. Under a warm key at
+  // dusk the old mid-greens came back pale and milky — the pitch was the
+  // brightest thing in the frame when it should be the thing the arena's
+  // lights are pointed at.
   const stripes = 16;
   for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? '#3f7d43' : '#36713b';
+    ctx.fillStyle = i % 2 ? '#2c6a33' : '#24592b';
     ctx.fillRect((i / stripes) * W, 0, W / stripes + 1, H);
   }
 
+  // A second set of bands across the first, at low contrast. One direction of
+  // mowing is a stripe; two is the diamond a groundsman actually leaves, and
+  // it is the difference between a pattern and a texture.
+  const cross = 11;
+  for (let i = 0; i < cross; i++) {
+    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.045)';
+    ctx.fillRect(0, (i / cross) * H, W, H / cross + 1);
+  }
+
+  // Wear and colour drift, so no two parts of the pitch are the same green.
+  for (let i = 0; i < 900; i++) {
+    const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
+    const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
+    const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
+    const x = r0 * W;
+    const y = r1 * H;
+    const r = 30 + r2 * 150;
+    const patch = ctx.createRadialGradient(x, y, 0, x, y, r);
+    patch.addColorStop(0, r2 > 0.5 ? 'rgba(150,190,120,0.05)' : 'rgba(18,48,24,0.07)');
+    patch.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = patch;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // A vignette, so the middle of the pitch is not a flat slab of one colour.
-  // Stronger falloff than daylight wants: under floodlights the middle of the
-  // pitch is the brightest thing in the arena and the corners fall away.
+  // The white centre is gone: the floodlights light the middle now, and
+  // painting the highlight into the albedo as well made it milky.
   const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.66);
-  vg.addColorStop(0, 'rgba(255,255,255,0.06)');
-  vg.addColorStop(0.55, 'rgba(0,0,0,0.06)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.26)');
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(0.55, 'rgba(0,0,0,0.1)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.34)');
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, W, H);
 
@@ -294,10 +351,15 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   const [el, ctx] = canvas(W, H);
   const b = wallBands(H);
 
-  // Upper wall: pale, with a slight gradient so it is not a flat fill.
+  // Upper wall: dark, with a slight gradient so it is not a flat fill.
+  //
+  // It was pale, and that is the single thing that made the arena read as a
+  // model rather than a building. A lit arena is dark structure with bright
+  // things on it; a white wall at dusk is brighter than the boards, brighter
+  // than the ribbon above it, and leaves nothing able to glow.
   const upper = ctx.createLinearGradient(0, b.boardTop, 0, 0);
-  upper.addColorStop(0, '#e7eef6');
-  upper.addColorStop(1, '#c6d2de');
+  upper.addColorStop(0, '#1b2434');
+  upper.addColorStop(1, '#2a3547');
   ctx.fillStyle = upper;
   ctx.fillRect(0, 0, W, H);
 
@@ -305,36 +367,39 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   // arena has one, and without it the boards ended in mid-air against the
   // stands with nothing marking the top of the playable wall.
   const railTop = b.boardTop - b.railH;
-  ctx.fillStyle = 'rgba(46,60,78,0.55)';
+  ctx.fillStyle = 'rgba(12,18,28,0.75)';
   for (const panel of wallPanels(W)) {
     ctx.fillRect(panel.x + panel.w / 2 - 2, railTop, 4, b.railH);
   }
-  ctx.fillStyle = '#5c6b7d';
+  ctx.fillStyle = '#8da4bd';
   ctx.fillRect(0, railTop, W, 5);
   ctx.fillRect(0, railTop + b.railH * 0.55, W, 4);
 
   // Hoardings. Panels of differing widths with abstract marks on them: a
   // uniform row of identical blank rectangles is what reads as placeholder.
-  const house = team === 'orange' ? '#c2622f' : team === 'blue' ? '#35719f' : '#2f4f73';
+  // Dark boards carrying bright marks, rather than bright boards carrying dark
+  // ones. Every third board takes the house colour; the rest are near-black,
+  // and the marks on all of them are what the eye actually catches.
+  const house = team === 'orange' ? '#8c3a16' : team === 'blue' ? '#17456e' : '#15294a';
   const post = 7;
   const panels = wallPanels(W);
   panels.forEach((panel, n) => {
     const dark = n % 3 === 1;
-    ctx.fillStyle = dark ? house : '#f1f5fa';
+    ctx.fillStyle = dark ? house : '#141b27';
     ctx.fillRect(panel.x + post / 2, b.boardTop, panel.w - post, b.boardH);
 
     // A faint vertical sheen across each board, brightest off-centre, so the
     // panels catch the light unevenly instead of reading as flat swatches.
     const sheen = ctx.createLinearGradient(panel.x, 0, panel.x + panel.w, 0);
     sheen.addColorStop(0, 'rgba(255,255,255,0)');
-    sheen.addColorStop(0.35, 'rgba(255,255,255,0.1)');
-    sheen.addColorStop(1, 'rgba(0,0,0,0.07)');
+    sheen.addColorStop(0.35, 'rgba(160,200,255,0.1)');
+    sheen.addColorStop(1, 'rgba(0,0,0,0.25)');
     ctx.fillStyle = sheen;
     ctx.fillRect(panel.x + post / 2, b.boardTop, panel.w - post, b.boardH);
 
     // A mark on the board: a wordless bar-and-dot device, which at this size
     // reads as signage without pretending to be anybody's logo.
-    ctx.fillStyle = dark ? 'rgba(255,255,255,0.84)' : 'rgba(38,58,86,0.74)';
+    ctx.fillStyle = dark ? 'rgba(255,214,170,0.92)' : 'rgba(150,205,255,0.9)';
     const cx = panel.x + panel.w / 2;
     const cy = b.boardTop + b.boardH / 2;
     const w = panel.w - post;
@@ -375,24 +440,26 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
     }
 
     // The stanchion between this panel and the next.
-    ctx.fillStyle = '#39465a';
+    ctx.fillStyle = '#0a0f18';
     ctx.fillRect(panel.x + panel.w - post / 2, b.boardTop - b.railH * 0.2, post, b.boardH + b.railH * 0.2);
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillStyle = 'rgba(170,215,255,0.3)';
     ctx.fillRect(panel.x + panel.w - post / 2, b.boardTop - b.railH * 0.2, 2, b.boardH + b.railH * 0.2);
   });
 
   // Trim above and below the boards.
-  ctx.fillStyle = '#44556a';
+  ctx.fillStyle = '#0d131d';
   ctx.fillRect(0, b.boardTop - H * 0.014, W, H * 0.014);
-  ctx.fillStyle = '#8d9eb1';
+  // The strip under the boards stays bright: it is the line the car runs
+  // along, and it reads at speed the way the ribbon above does.
+  ctx.fillStyle = '#9fb6cc';
   ctx.fillRect(0, b.boardTop + b.boardH, W, H * 0.018);
 
   // Kickplate, sitting immediately on top of the ramp: where a car actually
   // hits. Fine scratches along the direction of travel, not blobs — the first
   // version drew ellipses, which at this scale looked like bubbles stuck on.
   const plate = ctx.createLinearGradient(0, b.plateTop, 0, H);
-  plate.addColorStop(0, '#5d6a79');
-  plate.addColorStop(1, '#434e5b');
+  plate.addColorStop(0, '#3b4553');
+  plate.addColorStop(1, '#262e3a');
   ctx.fillStyle = plate;
   ctx.fillRect(0, b.plateTop, W, H - b.plateTop);
   for (let i = 0; i < 420; i++) {
@@ -474,8 +541,8 @@ export function rampTexture(rotated: boolean): THREE.Texture {
     ctx.rotate(Math.PI / 2);
   }
   drawRamp(ctx, S, (t) => {
-    const lo = [38, 46, 56];
-    const hi = [146, 160, 177];
+    const lo = [24, 30, 40];
+    const hi = [104, 118, 136];
     const c = lo.map((v, i) => Math.round(v + (hi[i]! - v) * t));
     return `rgb(${c[0]},${c[1]},${c[2]})`;
   });
@@ -645,6 +712,41 @@ export function carNormalMap(): THREE.Texture {
 }
 
 /** Fine grain for the pitch, tiled many times over. */
+/**
+ * Grass, as a tiled normal map of blades.
+ *
+ * The pitch albedo is one image stretched over ten thousand units, so a blade
+ * of grass in it would be a quarter of a pixel. Blade detail has to live in a
+ * map tiled small and often instead, which is why the pitch used to read as
+ * felt: it had the generic floor grain on it, and grain is isotropic — grass
+ * is not. Blades run one way, catch the light along their length, and that
+ * directionality is most of what tells you it is grass.
+ */
+export function grassNormalMap(): THREE.Texture {
+  return normalMapFromHeight(256, 2.6, (ctx, s) => {
+    ctx.fillStyle = '#6b6b6b';
+    ctx.fillRect(0, 0, s, s);
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 2600; i++) {
+      const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
+      const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
+      const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
+      const x = r0 * s;
+      const y = r1 * s;
+      // Mostly upright, leaning a little, the way a mown pitch lies.
+      const lean = (r2 - 0.5) * 0.9;
+      const len = s * (0.016 + r2 * 0.026);
+      const bright = Math.round(96 + r2 * 120);
+      ctx.strokeStyle = `rgb(${bright},${bright},${bright})`;
+      ctx.lineWidth = s / 230;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + lean * len, y - len);
+      ctx.stroke();
+    }
+  });
+}
+
 export function floorNormalMap(): THREE.Texture {
   return normalMapFromHeight(256, 1.4, (ctx, s) => {
     for (let i = 0; i < 9000; i++) {

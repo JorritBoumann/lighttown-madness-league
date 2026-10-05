@@ -110,8 +110,8 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   group.name = 'stadium';
   const edges = footprintEdges(layout);
 
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x2b3241, roughness: 0.94 });
-  const structure = new THREE.MeshStandardMaterial({ color: 0x6f7a89, roughness: 0.8, metalness: 0.3 });
+  const concrete = new THREE.MeshStandardMaterial({ color: 0x1d2330, roughness: 0.94 });
+  const structure = new THREE.MeshStandardMaterial({ color: 0x47505e, roughness: 0.8, metalness: 0.35 });
 
   // --- seating bowl ------------------------------------------------------
   // Two decks with a fascia between them. One deck reads as a terrace; the
@@ -251,8 +251,8 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   // --- fascia and banners ------------------------------------------------
   const fasciaMat = new THREE.MeshStandardMaterial({
     map: fasciaTexture(),
-    emissive: 0x2c3a52,
-    emissiveIntensity: 0.18,
+    emissive: 0x3d63a8,
+    emissiveIntensity: 0.85,
     roughness: 0.5,
     side: THREE.DoubleSide,
   });
@@ -281,7 +281,7 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   const roofY = upper.base + upper.rows * upper.rise + s.roofClearance;
   const roofSpanX = layout.halfLength + upper.inset + upper.rows * upper.tread + 900;
   const roofSpanZ = layout.halfWidth + upper.inset + upper.rows * upper.tread + 900;
-  const roofMat = new THREE.MeshStandardMaterial({ color: 0x9aa7b6, roughness: 0.9 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.92 });
 
   const roofParts: THREE.BufferGeometry[] = [];
   // Four spans round the bowl, leaving the middle open to the sky.
@@ -355,6 +355,62 @@ export function buildStadium(layout: ArenaLayout): Stadium {
 
   group.add(new THREE.Mesh(mergeGeometries(bankParts, false), lampMat));
   for (const geo of bankParts) geo.dispose();
+
+  // --- LED ribbon and roof strips ----------------------------------------
+  // Light the building with, rather than just light the building.
+  //
+  // `MeshBasicMaterial` with `toneMapped` off on purpose: these are supposed
+  // to be brighter than the tone curve's white point so the bloom pass
+  // catches them. Run through tone mapping they come out the same grey as a
+  // lit wall, which is what the fascia used to look like.
+  const ledMat = new THREE.MeshBasicMaterial({ color: 0xbfe6ff, toneMapped: false });
+  const warmStripMat = new THREE.MeshBasicMaterial({ color: 0xffb257, toneMapped: false });
+
+  // The ribbon round the top of the playable wall. It marks the line a car
+  // leaves when it climbs the wall, which is information as well as decoration.
+  const ledParts: THREE.BufferGeometry[] = [];
+  for (const edge of edges) {
+    ledParts.push(
+      edgeSlab(edge, s.ledInset, 22, s.ledHeight, cfg.arena.hoardingHeight + s.ledHeight / 2, 40),
+    );
+  }
+  group.add(new THREE.Mesh(mergeGeometries(ledParts, false), ledMat));
+  for (const geo of ledParts) geo.dispose();
+
+  // Warm strips along the inner lip of the roof, following the same footprint.
+  // The roof was a grey slab with trusses under it and nothing to say it was
+  // the top of a lit building.
+  const stripParts: THREE.BufferGeometry[] = [];
+  const stripOut = lower.inset + lower.rows * lower.tread + s.upperStep + upper.rows * upper.tread;
+  for (const edge of edges) {
+    stripParts.push(
+      edgeSlab(edge, stripOut * 0.42, s.roofStripDepth, 34, roofY - 150, 60),
+    );
+  }
+  group.add(new THREE.Mesh(mergeGeometries(stripParts, false), warmStripMat));
+  for (const geo of stripParts) geo.dispose();
+
+  // And a run down each corner, tying the roofline to the bowl. In a real
+  // arena these are the structural ribs picked out in light; here they are the
+  // thing that stops the upper half of the frame being an unbroken dark mass.
+  const ribParts: THREE.BufferGeometry[] = [];
+  for (const edge of edges) {
+    if (edge.length > 2000) continue; // the four cut corners only
+    const top = roofY - 150;
+    const foot = lower.base + lower.rows * lower.rise + s.fasciaHeight;
+    const rib = new THREE.BoxGeometry(edge.length * 0.5, top - foot, 30);
+    const angle = Math.atan2(edge.dir.y, edge.dir.x);
+    rib.rotateY(-angle);
+    rib.rotateX(0);
+    rib.translate(
+      edge.mid.x + edge.normal.x * (lower.inset + lower.rows * lower.tread),
+      (top + foot) / 2,
+      edge.mid.y + edge.normal.y * (lower.inset + lower.rows * lower.tread),
+    );
+    ribParts.push(rib);
+  }
+  group.add(new THREE.Mesh(mergeGeometries(ribParts, false), warmStripMat));
+  for (const geo of ribParts) geo.dispose();
 
   // --- screens -----------------------------------------------------------
   // A scoreline hanging at each end. A stadium has screens, and this one can

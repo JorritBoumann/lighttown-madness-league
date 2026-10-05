@@ -10,8 +10,11 @@ import { WORLD_UP } from '../core/axes';
  * rotation rate. That is the difference between a bot that looks like it is
  * flying and one that looks like it is falling over.
  *
- * Signs follow the car's conventions (see core/axes.ts): positive pitch is nose
- * down, positive yaw is nose right, positive roll is roll right. Each axis is
+ * Signs follow the car's input conventions (see core/axes.ts): positive pitch
+ * is nose down, positive yaw is nose right, positive roll is roll right. Note
+ * that none of those is a rotation about the matching body axis in the positive
+ * direction — about the car's right the nose goes up, and about its roof the
+ * nose goes left — so the projections below are negated. Each axis is
  * driven in those same units, so a term is `Kp * error - Kd * rate` throughout
  * rather than a different sign per axis.
  */
@@ -108,14 +111,17 @@ export function pointNoseAt(
   // turn at all, behind is pushed into pitching up rather than left to stall.
   if (!Number.isFinite(turnAxis.x) || turnAxis.lengthSq() < 0.5) {
     if (ahead > 0) turnAxis.set(0, 0, 0);
-    else turnAxis.copy(right).multiplyScalar(-1);
+    else turnAxis.copy(right);
   }
 
-  // Projected onto the car's own axes. A rotation about the car's right is
-  // nose-down and about its up is nose-right, which is exactly how positive
-  // pitch and yaw inputs are defined.
-  const pitchError = turnAxis.dot(right) * angle;
-  const yawError = turnAxis.dot(up) * angle;
+  // Projected onto the car's own axes, and negated.
+  //
+  // A rotation about the car's right is nose-*up* and about its roof is
+  // nose-*left*, whereas positive pitch means nose down and positive yaw means
+  // nose right. The two negations are what put the errors in the same units as
+  // the commands; they match the ones in `controlInAir`.
+  const pitchError = -turnAxis.dot(right) * angle;
+  const yawError = -turnAxis.dot(up) * angle;
 
   // Levelling: the roof should be up. Which way the car is banked is exactly
   // how far its right side has risen or fallen against world up.
@@ -129,11 +135,13 @@ export function pointNoseAt(
   const rollWeight = 1 - verticality * verticality;
   const rollError = right.dot(WORLD_UP) * rollWeight;
 
-  out.pitch = axis(pitchError, angvel.dot(right), gains.pitchAccel, gains);
-  out.steer = axis(yawError, angvel.dot(up), gains.yawAccel, gains);
-  // Positive roll input produces negative spin about the nose, so the measured
-  // rate is negated to put it in the same units as the command.
-  out.roll = axis(rollError, -angvel.dot(fwd), gains.rollAccel, gains);
+  // The measured rates are negated wherever the command is: `axis` subtracts
+  // the rate from the rate it wants, so the two have to be in the same units.
+  out.pitch = axis(pitchError, -angvel.dot(right), gains.pitchAccel, gains);
+  out.steer = axis(yawError, -angvel.dot(up), gains.yawAccel, gains);
+  // Positive roll input produces positive spin about the nose, so this one
+  // needs no sign change.
+  out.roll = axis(rollError, angvel.dot(fwd), gains.rollAccel, gains);
   out.error = Math.acos(Math.max(-1, Math.min(1, ahead)));
   return out;
 }

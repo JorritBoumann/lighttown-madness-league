@@ -12,7 +12,7 @@ import {
   wallTexture,
   rampTexture,
   rampNormalMap,
-  floorNormalMap,
+  grassNormalMap,
   wallNormalMap,
   wallRepeat,
 } from './textures';
@@ -58,25 +58,36 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   // Far out on purpose. The camera can sit ten thousand units from the far
   // goal, so fog that starts anywhere near the pitch turns the whole far half
   // into haze — which is exactly what the first attempt did.
-  scene.fog = new THREE.Fog(0xb9d2e8, 26000, 54000);
+  // Dusk haze rather than daylight haze, and nearer in: with the bowl dark,
+  // a little depth across the far half is what separates the near stand from
+  // the far one. Still far enough out that the pitch itself is clear.
+  scene.fog = new THREE.Fog(0x33294a, 18000, 46000);
 
   // Near and far have to suit a pitch 10240 long.
   const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1, 10, 40000);
   camera.position.set(-2000, 400, 0);
 
-  // Daylight. One sun, high and to one side, with the sky filling the shadows.
-  // The floodlight banks stay as furniture but do no lighting work.
-  // Generous sky fill. One sun plus a roof over the seating leaves the stands
-  // in deep shadow, which is physically right and reads as murk — outdoors
-  // the sky itself lights everything the sun does not.
-  const hemi = new THREE.HemisphereLight(0xccdffa, 0x6f8f5e, 1.25);
+  // Floodlit at dusk. The key is the light banks' contribution: strong, warm
+  // white, from high on one side, and the only thing casting a shadow. The sky
+  // fill is weak and violet, so the bowl falls away into its own structure
+  // instead of being lit as brightly as the grass.
+  //
+  // This is the balance the daylight version had backwards. A hemisphere at
+  // 1.25 lights concrete and grass alike, and a building with no shadow in it
+  // reads as a diagram rather than a place.
+  const hemi = new THREE.HemisphereLight(0x6e5f9c, 0x2b3326, cfg.render.hemiIntensity);
   scene.add(hemi);
 
-  const fill = new THREE.DirectionalLight(0xbcd4f0, 0.35);
+  // Cool counter-fill from the opposite side, which is what keeps the shadow
+  // side of the car and the ball from going to black.
+  const fill = new THREE.DirectionalLight(0x7d93d6, cfg.render.fillIntensity);
   fill.position.set(-4000, 2600, -2600);
   scene.add(fill);
 
-  let sun: THREE.DirectionalLight | null = new THREE.DirectionalLight(0xfff6e8, 2.4);
+  let sun: THREE.DirectionalLight | null = new THREE.DirectionalLight(
+    0xffeed6,
+    cfg.render.sunIntensity,
+  );
   sun.position.set(3200, 6000, 2400);
   scene.add(sun);
 
@@ -388,18 +399,21 @@ function buildPitch(layout: ArenaLayout): THREE.Mesh {
       // makes a glancing highlight break up instead of sliding across a sheet
       // of glass.
       normalMap: (() => {
-        const grain = floorNormalMap();
-        // Tiled small and often: at 48 tiles across a pitch this wide each
-        // speck is the size of a car and the floor reads as crumpled paper.
-        // The grain wants to be below the size of anything on it.
-        grain.repeat.set(130, 104);
-        return grain;
+        // Blades, not grain. At 130 tiles across the pitch one tile covers
+        // about eighty units, which puts a blade at a few units — the size it
+        // should be. The generic floor grain that used to be here is
+        // isotropic, and grass is the opposite: it lies one way and catches
+        // the light along its length, which is most of what reads as grass.
+        const blades = grassNormalMap();
+        blades.repeat.set(130, 104);
+        return blades;
       })(),
-      normalScale: new THREE.Vector2(0.2, 0.2),
-      // Some sheen, so the car and the lit goal mouths catch on it. A fully
-      // matte floor is the giveaway that a scene is untextured geometry.
-      roughness: 0.55,
-      metalness: 0.08,
+      normalScale: new THREE.Vector2(0.75, 0.75),
+      // Nearly matte. Grass is not shiny, and the sheen that used to be here
+      // spread a broad specular wash across the whole pitch the moment the key
+      // light got strong — which is what made it look milky rather than green.
+      roughness: 0.88,
+      metalness: 0,
       envMapIntensity: cfg.render.pitchEnvIntensity,
     }),
   );

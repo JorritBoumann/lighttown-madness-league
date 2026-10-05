@@ -554,6 +554,19 @@ export const config = {
     roofClearance: 900,
     /** Light shafts from the roof banks down onto the pitch. */
     shaftOpacity: 0.0,
+    /**
+     * The LED ribbon that runs round the arena just above the hoardings.
+     *
+     * The single most recognisable thing in a modern arena and the arena had
+     * nothing like it: the top of the playable wall simply stopped against the
+     * stands. It also does real work for the driving, because it draws the
+     * line the car is about to leave when it climbs the wall.
+     */
+    ledHeight: 46,
+    /** How far outside the wall it sits, so it cannot be driven into. */
+    ledInset: 26,
+    /** Warm strips along the inner lip of the roof, and down the corners. */
+    roofStripDepth: 70,
     /** The hanging scoreboards at each end. */
     screenWidth: 1500,
     tunnelHeight: 560,
@@ -660,7 +673,7 @@ export const config = {
 
   render: {
     /** Tone-mapping exposure. Higher is brighter before the filmic rolloff. */
-    exposure: 0.88,
+    exposure: 0.96,
     /** How much the sky gradient lights the scene through reflections. */
     /**
      * How much the reflection map lights the scene.
@@ -671,7 +684,7 @@ export const config = {
      * — the floor went from navy to pale blue without anything in the lighting
      * having been touched.
      */
-    environmentIntensity: 0.45,
+    environmentIntensity: 0.38,
     /** The same correction for the pitch, which reflects more than most. */
     pitchEnvIntensity: 0.15,
     /** Face size for the arena's self-captured reflection map. 256 is plenty:
@@ -701,10 +714,33 @@ export const config = {
      *  drag the resolution down with them. */
     scaleOutlierMs: 90,
 
-    /** Bloom: threshold is the brightness a pixel needs before it blooms. */
-    bloomStrength: 0.2,
-    bloomRadius: 0.62,
-    bloomThreshold: 0.85,
+    /**
+     * Lighting, as three numbers rather than three hard-coded constants
+     * halfway down the renderer.
+     *
+     * The balance is the whole look. A stadium at dusk is a dark structure
+     * with a lit pitch inside it: the key is strong and warm, the sky fill is
+     * weak and cool, and everything the key does not reach falls away. The
+     * daylight version had the hemisphere at 1.25 doing most of the work,
+     * which lights the concrete as brightly as the grass — and a building with
+     * no shadow in it reads as a diagram.
+     */
+    hemiIntensity: 0.46,
+    sunIntensity: 3.1,
+    fillIntensity: 0.3,
+
+    /**
+     * Bloom: threshold is the brightness a pixel needs before it blooms.
+     *
+     * Much stronger than the daylight version, because the arena now has
+     * things that are meant to glow — the LED ribbon, the roof strips, the
+     * pads — and at 0.2 they were just pale geometry. The threshold stays
+     * above the white pitch markings, which bloom at about 0.7 and look like
+     * a mistake when they do.
+     */
+    bloomStrength: 0.62,
+    bloomRadius: 0.72,
+    bloomThreshold: 0.76,
   },
 
   camera: {

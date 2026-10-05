@@ -60,10 +60,12 @@ describe('aiming', () => {
 
   it('yaws toward a target off to one side', () => {
     const b = basis();
-    // RIGHT is -z, so a target at -z is to the car's right.
-    const toRight = pointNoseAt(new THREE.Vector3(1, 0, -1), b.fwd, b.up, b.right, still, GAINS);
+    // The driver's right is +z: forward x up, for a car whose nose is +x and
+    // roof is +y. This test used to say -z, which is the car's left, and it
+    // passed because the code it was checking had the same sign backwards.
+    const toRight = pointNoseAt(new THREE.Vector3(1, 0, 1), b.fwd, b.up, b.right, still, GAINS);
     expect(toRight.steer).toBeGreaterThan(0);
-    const toLeft = pointNoseAt(new THREE.Vector3(1, 0, 1), b.fwd, b.up, b.right, still, GAINS);
+    const toLeft = pointNoseAt(new THREE.Vector3(1, 0, -1), b.fwd, b.up, b.right, still, GAINS);
     expect(toLeft.steer).toBeLessThan(0);
   });
 
@@ -117,15 +119,17 @@ describe('levelling', () => {
   });
 
   it('rolls back the way it came when banked', () => {
-    // Rolled right by 45 degrees: rotation about the nose by -45.
-    const q = new THREE.Quaternion().setFromAxisAngle(FORWARD, -Math.PI / 4);
+    // Rolled right by 45 degrees: a rotation about the nose by +45, which puts
+    // the right side down. The sign was the other way round here because RIGHT
+    // was defined as the car's left.
+    const q = new THREE.Quaternion().setFromAxisAngle(FORWARD, Math.PI / 4);
     const up = UP.clone().applyQuaternion(q);
     const right = RIGHT.clone().applyQuaternion(q);
     const rolledRight = pointNoseAt(FORWARD.clone(), FORWARD.clone(), up, right, still, GAINS);
     // Banked right, so the correction is a roll left.
     expect(rolledRight.roll).toBeLessThan(0);
 
-    const q2 = new THREE.Quaternion().setFromAxisAngle(FORWARD, Math.PI / 4);
+    const q2 = new THREE.Quaternion().setFromAxisAngle(FORWARD, -Math.PI / 4);
     const up2 = UP.clone().applyQuaternion(q2);
     const right2 = RIGHT.clone().applyQuaternion(q2);
     expect(pointNoseAt(FORWARD.clone(), FORWARD.clone(), up2, right2, still, GAINS).roll).toBeGreaterThan(0);
@@ -141,8 +145,9 @@ describe('damping', () => {
     const b = basis();
     const cold = pointNoseAt(SMALL, b.fwd, b.up, b.right, still, GAINS);
     expect(Math.abs(cold.pitch)).toBeLessThan(1); // not saturated
-    // Already pitching nose up: negative spin about the car's right.
-    const spinning = new THREE.Vector3().copy(RIGHT).multiplyScalar(-0.4);
+    // Already pitching nose up, which is a *positive* spin about the car's
+    // right — about that axis the nose rises.
+    const spinning = new THREE.Vector3().copy(RIGHT).multiplyScalar(0.4);
     const warm = pointNoseAt(SMALL, b.fwd, b.up, b.right, spinning, GAINS);
     expect(Math.abs(warm.pitch)).toBeLessThan(Math.abs(cold.pitch));
   });
@@ -150,7 +155,7 @@ describe('damping', () => {
   it('pushes harder when turning away from the target', () => {
     const b = basis();
     const cold = pointNoseAt(SMALL, b.fwd, b.up, b.right, still, GAINS);
-    const wrongWay = new THREE.Vector3().copy(RIGHT).multiplyScalar(0.4);
+    const wrongWay = new THREE.Vector3().copy(RIGHT).multiplyScalar(-0.4);
     const warm = pointNoseAt(SMALL, b.fwd, b.up, b.right, wrongWay, GAINS);
     expect(Math.abs(warm.pitch)).toBeGreaterThan(Math.abs(cold.pitch));
   });

@@ -892,3 +892,81 @@ describe('walls and the ceiling', () => {
     expect(Math.max(...samples) - Math.min(...samples)).toBeLessThan(3);
   });
 });
+
+/**
+ * Which way the controls go.
+ *
+ * The car steered backwards: pressing right turned it left, and the same sign
+ * error mirrored air yaw, air roll and sideways dodges. It survived because the
+ * bots were wrong in the matching way and drove correctly, so nothing in the
+ * suite and nobody but a human could see it. These check the player's
+ * experience of each control against the car's own right-hand side.
+ */
+describe('the controls go the way they are pressed', () => {
+  /** The car's right-hand side in world space: forward x up. */
+  function rightOf(c: Car): THREE.Vector3 {
+    const q = c.body.rotation();
+    return new THREE.Vector3(0, 0, 1).applyQuaternion(
+      new THREE.Quaternion(q.x, q.y, q.z, q.w),
+    );
+  }
+
+  function noseOf(c: Car): THREE.Vector3 {
+    const q = c.body.rotation();
+    return new THREE.Vector3(1, 0, 0).applyQuaternion(
+      new THREE.Quaternion(q.x, q.y, q.z, q.w),
+    );
+  }
+
+  it('steers right when you press right', () => {
+    const right0 = rightOf(car);
+    const nose0 = noseOf(car);
+    run(1, { throttle: 1, steer: 1 });
+    const nose1 = noseOf(car);
+    // The nose has swung towards the side the car called its right.
+    expect(nose1.dot(right0)).toBeGreaterThan(0.3);
+    expect(nose1.dot(nose0)).toBeLessThan(1);
+  });
+
+  it('steers left when you press left', () => {
+    const right0 = rightOf(car);
+    run(1, { throttle: 1, steer: -1 });
+    expect(noseOf(car).dot(right0)).toBeLessThan(-0.3);
+  });
+
+  it('yaws right in the air when you press right', () => {
+    const right0 = rightOf(car);
+    run(0.3, { jumpPressed: true, jumpHeld: true });
+    run(0.6, { steer: 1 });
+    expect(noseOf(car).dot(right0)).toBeGreaterThan(0.1);
+  });
+
+  it('rolls right in the air when you press roll right', () => {
+    run(0.3, { jumpPressed: true, jumpHeld: true });
+    run(0.5, { roll: 1 });
+    // Rolling right drops the right-hand side below the horizon.
+    expect(rightOf(car).y).toBeLessThan(-0.1);
+  });
+
+  it('dodges towards the side you press', () => {
+    run(1.2);
+    const right0 = rightOf(car);
+    run(0.03, { jumpPressed: true, jumpHeld: true });
+    run(0.2);
+    const before = new THREE.Vector3(car.velocity.x, 0, car.velocity.z);
+    run(0.03, { jumpPressed: true, steer: 1 });
+    const kick = new THREE.Vector3(car.velocity.x, 0, car.velocity.z).sub(before);
+    expect(kick.dot(right0)).toBeGreaterThan(200);
+  });
+
+  it('front flips nose down', () => {
+    run(1.2);
+    const nose0 = noseOf(car).y;
+    run(0.03, { jumpPressed: true, jumpHeld: true });
+    run(0.2);
+    run(0.03, { jumpPressed: true, throttle: 1 });
+    run(0.1);
+    // A front flip puts the nose below where it started, not above it.
+    expect(noseOf(car).y).toBeLessThan(nose0 - 0.1);
+  });
+});
