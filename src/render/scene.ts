@@ -10,8 +10,11 @@ import {
   pitchTexture,
   netTexture,
   wallTexture,
+  rampTexture,
+  rampNormalMap,
   floorNormalMap,
   wallNormalMap,
+  wallRepeat,
 } from './textures';
 import { ResolutionScaler } from './resolutionScaler';
 
@@ -175,18 +178,35 @@ export function buildArenaMesh(): THREE.Group {
   // walls are driveable, so it used to present twenty metres of blank wall at
   // exactly the height you look at while driving. Now only the bottom is
   // solid; above it the wall is glass, and the crowd is right there behind it.
-  const wallTex = wallTexture();
-  wallTex.repeat.set(4, 1);
-  const wallRelief = wallNormalMap();
-  wallRelief.repeat.set(4, 1);
-  const wallMat = new THREE.MeshStandardMaterial({
-    map: wallTex,
-    normalMap: wallRelief,
-    normalScale: new THREE.Vector2(0.9, 0.9),
-    roughness: 0.42,
-    metalness: 0.08,
-    side: THREE.DoubleSide,
-  });
+  // One material per distinct run of wall, tiled to that run's own length.
+  //
+  // A fixed number of repeats across walls of different lengths stretches the
+  // texture differently on each: at four tiles the long walls were spanning
+  // two and a half thousand units per tile, so every edge was soft and the
+  // hoardings read as blurred rectangles. Cached by repeat count, so the two
+  // side walls share one material rather than making their own.
+  const wallMaterials = new Map<number, THREE.MeshStandardMaterial>();
+  const wallMaterialFor = (lengthUnits: number): THREE.MeshStandardMaterial => {
+    const tiles = wallRepeat(lengthUnits);
+    const existing = wallMaterials.get(tiles);
+    if (existing) return existing;
+    const map = wallTexture();
+    map.repeat.set(tiles, 1);
+    const relief = wallNormalMap();
+    relief.wrapS = relief.wrapT = THREE.RepeatWrapping;
+    relief.repeat.set(tiles, 1);
+    const material = new THREE.MeshStandardMaterial({
+      map,
+      normalMap: relief,
+      normalScale: new THREE.Vector2(0.8, 0.8),
+      roughness: 0.46,
+      metalness: 0.06,
+      side: THREE.DoubleSide,
+    });
+    wallMaterials.set(tiles, material);
+    return material;
+  };
+  const wallMat = wallMaterialFor(cfg.arena.halfLength * 2);
   // Front faces only, and barely there. Double-sided glass with depth writing
   // off stacks every panel the view passes through — the far wall, both side
   // walls, the near wall — and four layers of a 12% tint is an opaque white
@@ -202,12 +222,36 @@ export function buildArenaMesh(): THREE.Group {
     side: THREE.FrontSide,
     depthWrite: false,
   });
-  const rampMat = new THREE.MeshStandardMaterial({
-    color: 0xbcc7d4,
-    roughness: 0.38,
-    metalness: 0.12,
-    side: THREE.DoubleSide,
-  });
+  // Ramps get their own material per (orientation, tile count). The old one
+  // was a single flat pale colour, and because the ramp is a quarter of the
+  // frame whenever the camera is low near a wall, that one fill was the
+  // largest and emptiest surface in the arena. It now continues the kickplate
+  // above it, tiled on the same rhythm as the hoardings.
+  const rampMaterials = new Map<string, THREE.MeshStandardMaterial>();
+  const rampMaterialFor = (lengthUnits: number, rotated: boolean): THREE.MeshStandardMaterial => {
+    const tiles = wallRepeat(lengthUnits);
+    const key = `${tiles}:${rotated}`;
+    const existing = rampMaterials.get(key);
+    if (existing) return existing;
+    const map = rampTexture(rotated);
+    const relief = rampNormalMap(rotated);
+    relief.wrapS = relief.wrapT = THREE.RepeatWrapping;
+    for (const tex of [map, relief]) {
+      if (rotated) tex.repeat.set(1, tiles);
+      else tex.repeat.set(tiles, 1);
+    }
+    const material = new THREE.MeshStandardMaterial({
+      map,
+      normalMap: relief,
+      normalScale: new THREE.Vector2(0.7, 0.7),
+      roughness: 0.42,
+      metalness: 0.1,
+      side: THREE.DoubleSide,
+    });
+    rampMaterials.set(key, material);
+    return material;
+  };
+  const rampMat = rampMaterialFor(cfg.arena.halfLength * 2, false);
   // The ceiling is a playable surface but sits between the camera and the pitch,
   // so it is drawn as a faint shell rather than a solid lid.
   const ceilingMat = new THREE.MeshStandardMaterial({
@@ -238,7 +282,12 @@ export function buildArenaMesh(): THREE.Group {
     const bands: { height: number; centre: number; material: THREE.Material }[] =
       panel.kind === 'wall' && !panel.pitch && panel.half.y * 2 > solidTop * 1.5
         ? [
-            { height: solidTop, centre: solidTop / 2, material: wallMat },
+            {
+              height: solidTop,
+              centre: solidTop / 2,
+              // Tiled to this run's own length, so nothing is stretched.
+              material: wallMaterialFor(Math.max(panel.half.x, panel.half.z) * 2),
+            },
             {
               height: panel.half.y * 2 - solidTop,
               centre: solidTop + (panel.half.y * 2 - solidTop) / 2,
@@ -249,7 +298,17 @@ export function buildArenaMesh(): THREE.Group {
             {
               height: panel.half.y * 2,
               centre: panel.pos.y,
-              material: byKind[panel.kind ?? 'wall'] ?? wallMat,
+              material:
+                panel.kind === 'ramp'
+                  ? // The long side of the box is the run of wall it follows;
+                    // the short side is the slope. Which of the two is `u` on
+                    // the box's top face depends on that, so the texture is
+                    // generated to match rather than tiled blindly.
+                    rampMaterialFor(
+                      Math.max(panel.half.x, panel.half.z) * 2,
+                      panel.half.z > panel.half.x,
+                    )
+                  : (byKind[panel.kind ?? 'wall'] ?? wallMat),
             },
           ];
 
@@ -277,9 +336,12 @@ export function buildArenaMesh(): THREE.Group {
     group.add(buildGoal(goal));
     // The wall either side of each net carries that end's colours, which is
     // the cue you read when the pitch markings are out of shot.
+    const cheekW = (layout.halfWidth * 2 - goal.width) / 2;
     const endTex = wallTexture(goal.sign > 0 ? 'orange' : 'blue');
-    endTex.repeat.set(1, 1);
+    endTex.repeat.set(wallRepeat(cheekW), 1);
     const endRelief = wallNormalMap();
+    endRelief.wrapS = endRelief.wrapT = THREE.RepeatWrapping;
+    endRelief.repeat.set(wallRepeat(cheekW), 1);
     const endMat = new THREE.MeshStandardMaterial({
       map: endTex,
       normalMap: endRelief,
@@ -288,7 +350,7 @@ export function buildArenaMesh(): THREE.Group {
       metalness: 0.08,
       side: THREE.DoubleSide,
     });
-    const cheekWidth = (layout.halfWidth * 2 - goal.width) / 2;
+    const cheekWidth = cheekW;
     for (const zs of [1, -1]) {
       const cheek = new THREE.Mesh(
         new THREE.PlaneGeometry(cheekWidth, layout.ceiling * 0.5),

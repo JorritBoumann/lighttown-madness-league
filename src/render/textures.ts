@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { cfg } from '../config';
 import type { ArenaLayout } from '../core/arenaLayout';
 
 /**
@@ -234,143 +235,264 @@ export function ballTexture(): THREE.Texture {
 }
 
 /**
- * The boundary wall: a dark kickplate at the bottom, a band of hoardings, and
- * a clean upper face.
+ * The boundary wall: kickplate, hoardings, stanchions and a railing.
  *
- * Large flat white walls were the last thing in shot with no detail on them,
- * and a wall with nothing on it gives the eye no sense of speed as it goes
- * past — the same reason the floor needed markings rather than a grid.
+ * Drawn for one tile covering `WALL_TILE` units of wall by its full solid
+ * height, and the caller repeats it to suit each panel's own length — see
+ * `wallRepeat`. Tiling a fixed number of times across walls of different
+ * lengths is what made this stretch: one tile was spanning two and a half
+ * thousand units, so every edge in it was soft and the panels read as blurred
+ * rectangles.
  */
-export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
-  const W = 1024;
-  const H = 256;
-  const [el, ctx] = canvas(W, H);
+export const WALL_TILE = 2048;
 
-  ctx.fillStyle = '#d5dde7';
-  ctx.fillRect(0, 0, W, H);
+/**
+ * Panel widths within a tile, as weights.
+ *
+ * They are normalised to fill the tile exactly. An earlier version advanced by
+ * a fixed fraction until it ran off the edge, which cut the last panel in half
+ * and butted that half against a whole one at every tile boundary — a hard
+ * seam every 1100 units, and the normal map's seams landing nowhere near the
+ * albedo's.
+ */
+const WALL_PANELS = [1.4, 1, 0.75, 1.15, 0.9, 1.3, 0.8, 1.05];
 
-  // Upper face, very slightly cooler than the lower, so the two bands read as
-  // separate surfaces rather than one.
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, 'rgba(255,255,255,0.45)');
-  g.addColorStop(1, 'rgba(120,140,165,0.22)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  // Hoardings: alternating panels across the middle of the wall.
-  const boardTop = H * 0.44;
-  const boardH = H * 0.3;
-  const panels = 10;
-  // Low contrast on purpose. Alternating white and near-black at this density
-  // reads as a zebra crossing and pulls the eye off the pitch, which is the
-  // opposite of what detail on a wall is for.
-  // The hoardings are the lit band on an otherwise dark wall, which is what
-  // gives a sense of speed as it goes past.
-  const accent = team === 'orange' ? '#c2622f' : team === 'blue' ? '#35719f' : '#8d99a8';
-  for (let i = 0; i < panels; i++) {
-    ctx.fillStyle = i % 2 ? accent : '#eef3f9';
-    ctx.fillRect((i / panels) * W, boardTop, W / panels + 1, boardH);
+function wallPanels(w: number): { x: number; w: number }[] {
+  const total = WALL_PANELS.reduce((a, b) => a + b, 0);
+  const out: { x: number; w: number }[] = [];
+  let x = 0;
+  for (const weight of WALL_PANELS) {
+    const width = (w * weight) / total;
+    out.push({ x, w: width });
+    x += width;
   }
-  ctx.fillStyle = 'rgba(12,18,28,0.6)';
-  ctx.fillRect(0, boardTop - H * 0.015, W, H * 0.015);
-  ctx.fillRect(0, boardTop + boardH, W, H * 0.015);
+  return out;
+}
 
-  // Kickplate: scuffed dark band at floor level, where a car actually hits.
-  ctx.fillStyle = '#5a6373';
-  ctx.fillRect(0, H * 0.86, W, H * 0.14);
-  ctx.fillStyle = 'rgba(255,255,255,0.06)';
-  for (let i = 0; i < 120; i++) {
-    const x = (i * 97.3) % W;
-    ctx.fillRect(x, H * 0.86 + ((i * 13) % (H * 0.14)), 18, 2);
+/**
+ * Where each horizontal band sits, in canvas rows.
+ *
+ * The floor-wall chamfer covers the bottom `wallChamfer` units of a
+ * `hoardingHeight`-unit solid band, so anything down there is behind the ramp
+ * and never seen. The canvas runs top-of-wall to bottom-of-wall, so that hidden
+ * strip is at the *bottom* of the image and the layout is built upwards from
+ * it. Getting that the wrong way round put the hoardings behind the ramp and
+ * left a blank wall.
+ */
+function wallBands(h: number) {
+  const hidden = h * (cfg.arena.wallChamfer / cfg.arena.hoardingHeight);
+  const plateH = h * 0.1;
+  const plateTop = h - hidden - plateH;
+  const boardH = h * 0.36;
+  const boardTop = plateTop - boardH;
+  return { hidden, plateH, plateTop, boardH, boardTop, railH: h * 0.05 };
+}
+
+export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
+  const W = 2048;
+  const H = 620;
+  const [el, ctx] = canvas(W, H);
+  const b = wallBands(H);
+
+  // Upper wall: pale, with a slight gradient so it is not a flat fill.
+  const upper = ctx.createLinearGradient(0, b.boardTop, 0, 0);
+  upper.addColorStop(0, '#e7eef6');
+  upper.addColorStop(1, '#c6d2de');
+  ctx.fillStyle = upper;
+  ctx.fillRect(0, 0, W, H);
+
+  // Railing along the top of the boards: two rails on short posts. A real
+  // arena has one, and without it the boards ended in mid-air against the
+  // stands with nothing marking the top of the playable wall.
+  const railTop = b.boardTop - b.railH;
+  ctx.fillStyle = 'rgba(46,60,78,0.55)';
+  for (const panel of wallPanels(W)) {
+    ctx.fillRect(panel.x + panel.w / 2 - 2, railTop, 4, b.railH);
+  }
+  ctx.fillStyle = '#5c6b7d';
+  ctx.fillRect(0, railTop, W, 5);
+  ctx.fillRect(0, railTop + b.railH * 0.55, W, 4);
+
+  // Hoardings. Panels of differing widths with abstract marks on them: a
+  // uniform row of identical blank rectangles is what reads as placeholder.
+  const house = team === 'orange' ? '#c2622f' : team === 'blue' ? '#35719f' : '#2f4f73';
+  const post = 7;
+  const panels = wallPanels(W);
+  panels.forEach((panel, n) => {
+    const dark = n % 3 === 1;
+    ctx.fillStyle = dark ? house : '#f1f5fa';
+    ctx.fillRect(panel.x + post / 2, b.boardTop, panel.w - post, b.boardH);
+
+    // A faint vertical sheen across each board, brightest off-centre, so the
+    // panels catch the light unevenly instead of reading as flat swatches.
+    const sheen = ctx.createLinearGradient(panel.x, 0, panel.x + panel.w, 0);
+    sheen.addColorStop(0, 'rgba(255,255,255,0)');
+    sheen.addColorStop(0.35, 'rgba(255,255,255,0.1)');
+    sheen.addColorStop(1, 'rgba(0,0,0,0.07)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(panel.x + post / 2, b.boardTop, panel.w - post, b.boardH);
+
+    // A mark on the board: a wordless bar-and-dot device, which at this size
+    // reads as signage without pretending to be anybody's logo.
+    ctx.fillStyle = dark ? 'rgba(255,255,255,0.84)' : 'rgba(38,58,86,0.74)';
+    const cx = panel.x + panel.w / 2;
+    const cy = b.boardTop + b.boardH / 2;
+    const w = panel.w - post;
+    const style = (n * 5 + 3) % 6;
+    if (style === 0) {
+      ctx.fillRect(cx - w * 0.26, cy - b.boardH * 0.12, w * 0.52, b.boardH * 0.08);
+      ctx.fillRect(cx - w * 0.18, cy + b.boardH * 0.03, w * 0.36, b.boardH * 0.08);
+    } else if (style === 1) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, b.boardH * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (style === 2) {
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(cx + (i - 1) * w * 0.17 - w * 0.05, cy - b.boardH * 0.16, w * 0.1, b.boardH * 0.32);
+      }
+    } else if (style === 3) {
+      ctx.fillRect(cx - w * 0.24, cy - b.boardH * 0.04, w * 0.48, b.boardH * 0.09);
+    } else if (style === 4) {
+      // A chevron pair, drawn as rotated bars.
+      ctx.save();
+      ctx.translate(cx, cy);
+      for (const s of [-1, 1]) {
+        ctx.save();
+        ctx.rotate((s * Math.PI) / 5);
+        ctx.fillRect(-w * 0.04, -b.boardH * 0.17, w * 0.08, b.boardH * 0.34);
+        ctx.restore();
+      }
+      ctx.restore();
+    } else {
+      // A ring, which reads differently from the filled dot at a distance.
+      ctx.lineWidth = Math.max(3, b.boardH * 0.06);
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.beginPath();
+      ctx.arc(cx, cy, b.boardH * 0.19, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillRect(cx - w * 0.3, cy - b.boardH * 0.03, w * 0.14, b.boardH * 0.06);
+      ctx.fillRect(cx + w * 0.16, cy - b.boardH * 0.03, w * 0.14, b.boardH * 0.06);
+    }
+
+    // The stanchion between this panel and the next.
+    ctx.fillStyle = '#39465a';
+    ctx.fillRect(panel.x + panel.w - post / 2, b.boardTop - b.railH * 0.2, post, b.boardH + b.railH * 0.2);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(panel.x + panel.w - post / 2, b.boardTop - b.railH * 0.2, 2, b.boardH + b.railH * 0.2);
+  });
+
+  // Trim above and below the boards.
+  ctx.fillStyle = '#44556a';
+  ctx.fillRect(0, b.boardTop - H * 0.014, W, H * 0.014);
+  ctx.fillStyle = '#8d9eb1';
+  ctx.fillRect(0, b.boardTop + b.boardH, W, H * 0.018);
+
+  // Kickplate, sitting immediately on top of the ramp: where a car actually
+  // hits. Fine scratches along the direction of travel, not blobs — the first
+  // version drew ellipses, which at this scale looked like bubbles stuck on.
+  const plate = ctx.createLinearGradient(0, b.plateTop, 0, H);
+  plate.addColorStop(0, '#5d6a79');
+  plate.addColorStop(1, '#434e5b');
+  ctx.fillStyle = plate;
+  ctx.fillRect(0, b.plateTop, W, H - b.plateTop);
+  for (let i = 0; i < 420; i++) {
+    const sx = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * W;
+    const sy = b.plateTop + Math.abs((Math.sin(i * 78.233) * 1234.5) % 1) * (H - b.plateTop);
+    const len = 8 + ((i * 13) % 42);
+    ctx.strokeStyle = i % 3 === 0 ? 'rgba(255,255,255,0.11)' : 'rgba(18,26,36,0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx + len, sy + ((i % 3) - 1) * 0.6);
+    ctx.stroke();
   }
 
   return finish(el, true);
 }
 
-/**
- * The fascia band between the two decks: lit panels in the house colours.
- *
- * A stadium's fascia is where the sponsor boards and the big lit letters go,
- * and it is at exactly the height the chase camera looks at, so it carries a
- * disproportionate amount of the "this is a venue" feeling.
- */
-export function fasciaTexture(): THREE.Texture {
-  const W = 1024;
-  const H = 128;
-  const [el, ctx] = canvas(W, H);
-
-  ctx.fillStyle = '#7e8a99';
-  ctx.fillRect(0, 0, W, H);
-
-  // Lit panels, alternating house colours with dark gaps between.
-  const panels = 12;
-  const colours = ['#35719f', '#dfe6ee', '#c2622f', '#dfe6ee'];
-  for (let i = 0; i < panels; i++) {
-    const x = (i / panels) * W;
-    const w = W / panels;
-    ctx.fillStyle = colours[i % colours.length]!;
-    ctx.fillRect(x + w * 0.06, H * 0.18, w * 0.88, H * 0.64);
-  }
-
-  // A lit pipe along the top and bottom edge, which is what reads at distance.
-  ctx.fillStyle = 'rgba(190,215,255,0.9)';
-  ctx.fillRect(0, 0, W, H * 0.1);
-  ctx.fillRect(0, H * 0.9, W, H * 0.1);
-
-  const tex = finish(el, true);
-  tex.repeat.set(6, 1);
-  return tex;
+/** How many times the wall texture tiles across a run of wall this long. */
+export function wallRepeat(lengthUnits: number): number {
+  return Math.max(1, Math.round(lengthUnits / WALL_TILE));
 }
 
 /**
- * A hanging scoreboard, redrawn when the score or clock changes.
+ * The floor-to-wall ramp.
  *
- * Returns the draw function rather than a finished texture: the caller owns
- * when it is worth repainting, and repainting a canvas every frame to show a
- * clock that ticks once a second is pure waste.
+ * This surface is a quarter of everything you see when the camera is low and
+ * near a wall, and it was one flat pale colour — the brightest, emptiest thing
+ * in the arena. It is drawn as a continuation of the kickplate above it:
+ * the same slate, ribbed across the slope, with a dark trim at each edge.
+ *
+ * The drawing is symmetric along the slope on purpose. The ramps are boxes
+ * rotated into place, and which end of the slope a box's `v` runs towards
+ * differs between the side walls and the end walls; a design with a top and a
+ * bottom would be upside down on half of them.
  */
-export function screenCanvas(): {
-  texture: THREE.CanvasTexture;
-  draw: (info: { blue: number; orange: number; clock: string; label: string }) => void;
-} {
-  const W = 512;
-  const H = 256;
-  const [el, ctx] = canvas(W, H);
-  const texture = new THREE.CanvasTexture(el);
-  texture.colorSpace = THREE.SRGBColorSpace;
+function drawRamp(ctx: CanvasRenderingContext2D, s: number, shade: (t: number) => string): void {
+  ctx.fillStyle = shade(0.5);
+  ctx.fillRect(0, 0, s, s);
 
-  const draw = (info: { blue: number; orange: number; clock: string; label: string }): void => {
-    ctx.fillStyle = '#05080f';
-    ctx.fillRect(0, 0, W, H);
+  // Ribs across the slope: the line the car crosses on its way up.
+  const ribs = 11;
+  for (let i = 0; i < ribs; i++) {
+    const y = ((i + 0.5) / ribs) * s;
+    const h = s / ribs;
+    ctx.fillStyle = shade(i % 2 ? 0.42 : 0.58);
+    ctx.fillRect(0, y - h / 2, s, h);
+    ctx.fillStyle = shade(0.78);
+    ctx.fillRect(0, y - h / 2, s, Math.max(1, s / 420));
+  }
 
-    // Team blocks either side of the clock, same arrangement as the HUD so the
-    // screen and the scoreboard never disagree about which side is which.
-    ctx.fillStyle = '#1c4f7d';
-    ctx.fillRect(0, 56, 150, 120);
-    ctx.fillStyle = '#9c4524';
-    ctx.fillRect(W - 150, 56, 150, 120);
+  // Trim at both edges of the slope, where it meets the pitch and the
+  // kickplate. Darker than the body, with a bright lip inboard of it.
+  const edge = s * 0.055;
+  for (const top of [0, s - edge]) {
+    ctx.fillStyle = shade(0.2);
+    ctx.fillRect(0, top, s, edge);
+  }
+  ctx.fillStyle = shade(0.85);
+  ctx.fillRect(0, edge, s, Math.max(1, s / 340));
+  ctx.fillRect(0, s - edge - Math.max(1, s / 340), s, Math.max(1, s / 340));
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#eaf2ff';
-    ctx.font = 'bold 86px system-ui, sans-serif';
-    ctx.fillText(String(info.blue), 75, 118);
-    ctx.fillText(String(info.orange), W - 75, 118);
+  // Seams along the run, on the same rhythm as the hoardings above, so the
+  // ramp reads as the bottom of the same structure rather than a separate band.
+  for (const panel of wallPanels(s)) {
+    ctx.fillStyle = shade(0.16);
+    ctx.fillRect(panel.x + panel.w - 2, 0, 4, s);
+  }
+}
 
-    ctx.font = 'bold 64px system-ui, sans-serif';
-    ctx.fillText(info.clock, W / 2, 112);
+/**
+ * `rotated` swaps the slope onto `u`, for the ramps whose box has its long
+ * side along `z`. The caller tiles the long axis and leaves the slope at one.
+ */
+export function rampTexture(rotated: boolean): THREE.Texture {
+  const S = 1024;
+  const [el, ctx] = canvas(S, S);
+  if (rotated) {
+    ctx.translate(S, 0);
+    ctx.rotate(Math.PI / 2);
+  }
+  drawRamp(ctx, S, (t) => {
+    const lo = [38, 46, 56];
+    const hi = [146, 160, 177];
+    const c = lo.map((v, i) => Math.round(v + (hi[i]! - v) * t));
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  });
+  return finish(el, true);
+}
 
-    ctx.font = '600 24px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(190,210,240,0.8)';
-    ctx.fillText(info.label.toUpperCase().slice(0, 28), W / 2, 206);
-
-    ctx.strokeStyle = 'rgba(150,185,230,0.5)';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, W - 6, H - 6);
-  };
-
-  draw({ blue: 0, orange: 0, clock: '0:00', label: '' });
-  return { texture, draw };
+export function rampNormalMap(rotated: boolean): THREE.Texture {
+  return normalMapFromHeight(512, 2.2, (ctx, s) => {
+    if (rotated) {
+      ctx.translate(s, 0);
+      ctx.rotate(Math.PI / 2);
+    }
+    drawRamp(ctx, s, (t) => {
+      const v = Math.round(60 + t * 150);
+      return `rgb(${v},${v},${v})`;
+    });
+  });
 }
 
 /**
@@ -536,44 +658,127 @@ export function floorNormalMap(): THREE.Texture {
 }
 
 /**
- * The boundary wall in relief: the hoarding panels proud of the wall, a ridge
- * where the boards meet it, and the kickplate scuffed.
- *
- * The wall is the surface that fills the view at eye level while driving, so
- * it earns its own map more than anything else here does.
+ * The wall in relief: the hoardings standing proud, their seams, and the
+ * kickplate scratched.
  */
 export function wallNormalMap(): THREE.Texture {
-  return normalMapFromHeight(512, 4.5, (ctx, s) => {
-    const boardTop = s * 0.44;
-    const boardH = s * 0.3;
+  return normalMapFromHeight(512, 3.4, (ctx, s) => {
+    const b = wallBands(s);
 
-    // The hoardings stand proud, so their top and bottom edges catch light.
+    // Boards proud of the wall behind them, with the rail proud again above.
     ctx.fillStyle = '#b4b4b4';
-    ctx.fillRect(0, boardTop, s, boardH);
+    ctx.fillRect(0, b.boardTop, s, b.boardH);
+    ctx.fillStyle = '#cfcfcf';
+    ctx.fillRect(0, b.boardTop - b.railH, s, 4);
+    ctx.fillRect(0, b.boardTop - b.railH * 0.45, s, 3);
 
-    // Seams between the panels.
-    ctx.strokeStyle = '#3c3c3c';
-    ctx.lineWidth = Math.max(2, s / 180);
-    const panels = 10;
-    for (let i = 0; i <= panels; i++) {
-      const x = (i / panels) * s;
+    // Stanchions between the panels, at the same rhythm as the albedo — the
+    // two share `wallPanels`, so they cannot drift apart.
+    const post = Math.max(2, s / 290);
+    for (const panel of wallPanels(s)) {
+      ctx.fillStyle = '#5a5a5a';
+      ctx.fillRect(panel.x + panel.w - post / 2, b.boardTop, post, b.boardH);
+    }
+
+    // Kickplate, recessed, with scratches rather than dents.
+    ctx.fillStyle = '#6a6a6a';
+    ctx.fillRect(0, b.plateTop, s, s - b.plateTop);
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 240; i++) {
+      const sx = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
+      const sy = b.plateTop + Math.abs((Math.sin(i * 78.233) * 1234.5) % 1) * (s - b.plateTop);
+      const len = 5 + ((i * 11) % 26);
+      ctx.strokeStyle = i % 2 ? '#8c8c8c' : '#4a4a4a';
       ctx.beginPath();
-      ctx.moveTo(x, boardTop);
-      ctx.lineTo(x, boardTop + boardH);
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + len, sy);
       ctx.stroke();
     }
-
-    // Kickplate, dented where cars actually hit it.
-    ctx.fillStyle = '#6e6e6e';
-    ctx.fillRect(0, s * 0.86, s, s * 0.14);
-    for (let i = 0; i < 70; i++) {
-      const x = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
-      const y = s * 0.86 + Math.abs((Math.sin(i * 78.233) * 1234.5) % 1) * s * 0.14;
-      const v = 90 + ((i * 29) % 70);
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      ctx.beginPath();
-      ctx.ellipse(x, y, s / 70, s / 180, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
   });
+}
+
+/**
+ * The fascia band between the two decks: lit panels in the house colours.
+ *
+ * A stadium's fascia is where the sponsor boards and the big lit letters go,
+ * and it is at exactly the height the chase camera looks at, so it carries a
+ * disproportionate amount of the "this is a venue" feeling.
+ */
+export function fasciaTexture(): THREE.Texture {
+  const W = 1024;
+  const H = 128;
+  const [el, ctx] = canvas(W, H);
+
+  ctx.fillStyle = '#7e8a99';
+  ctx.fillRect(0, 0, W, H);
+
+  // Lit panels, alternating house colours with dark gaps between.
+  const panels = 12;
+  const colours = ['#35719f', '#dfe6ee', '#c2622f', '#dfe6ee'];
+  for (let i = 0; i < panels; i++) {
+    const x = (i / panels) * W;
+    const w = W / panels;
+    ctx.fillStyle = colours[i % colours.length]!;
+    ctx.fillRect(x + w * 0.06, H * 0.18, w * 0.88, H * 0.64);
+  }
+
+  // A lit pipe along the top and bottom edge, which is what reads at distance.
+  ctx.fillStyle = 'rgba(190,215,255,0.9)';
+  ctx.fillRect(0, 0, W, H * 0.1);
+  ctx.fillRect(0, H * 0.9, W, H * 0.1);
+
+  const tex = finish(el, true);
+  tex.repeat.set(6, 1);
+  return tex;
+}
+
+/**
+ * A hanging scoreboard, redrawn when the score or clock changes.
+ *
+ * Returns the draw function rather than a finished texture: the caller owns
+ * when it is worth repainting, and repainting a canvas every frame to show a
+ * clock that ticks once a second is pure waste.
+ */
+export function screenCanvas(): {
+  texture: THREE.CanvasTexture;
+  draw: (info: { blue: number; orange: number; clock: string; label: string }) => void;
+} {
+  const W = 512;
+  const H = 256;
+  const [el, ctx] = canvas(W, H);
+  const texture = new THREE.CanvasTexture(el);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const draw = (info: { blue: number; orange: number; clock: string; label: string }): void => {
+    ctx.fillStyle = '#05080f';
+    ctx.fillRect(0, 0, W, H);
+
+    // Team blocks either side of the clock, same arrangement as the HUD so the
+    // screen and the scoreboard never disagree about which side is which.
+    ctx.fillStyle = '#1c4f7d';
+    ctx.fillRect(0, 56, 150, 120);
+    ctx.fillStyle = '#9c4524';
+    ctx.fillRect(W - 150, 56, 150, 120);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#eaf2ff';
+    ctx.font = 'bold 86px system-ui, sans-serif';
+    ctx.fillText(String(info.blue), 75, 118);
+    ctx.fillText(String(info.orange), W - 75, 118);
+
+    ctx.font = 'bold 64px system-ui, sans-serif';
+    ctx.fillText(info.clock, W / 2, 112);
+
+    ctx.font = '600 24px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(190,210,240,0.8)';
+    ctx.fillText(info.label.toUpperCase().slice(0, 28), W / 2, 206);
+
+    ctx.strokeStyle = 'rgba(150,185,230,0.5)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
+  };
+
+  draw({ blue: 0, orange: 0, clock: '0:00', label: '' });
+  return { texture, draw };
 }
