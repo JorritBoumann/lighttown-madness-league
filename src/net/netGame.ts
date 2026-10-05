@@ -10,6 +10,8 @@ import { Simulation } from '../sim/simulation';
 import { Loop } from '../core/loop';
 import { Controls } from '../input/controls';
 import { NetClient } from './client';
+import { ConfigOverrides } from '../state/configOverride';
+import { disposeArenaMesh } from '../render/scene';
 import { cfg } from '../config';
 
 /**
@@ -36,6 +38,17 @@ export class NetGame {
   private readonly ballMesh: THREE.Mesh;
   private readonly ballInterp: TransformInterpolator;
   private readonly status: HTMLElement;
+  /**
+   * The round's tuning, applied here rather than worked out here.
+   *
+   * The server sends the numbers in force and this writes them into the same
+   * `cfg` the simulation reads, so the client's prediction runs under exactly
+   * the gravity and ball mass the authority does. Deriving them from modifier
+   * names instead would be two machines agreeing, which is a thing that works
+   * until one of them is a version behind.
+   */
+  private readonly roundConfig = new ConfigOverrides();
+  private arenaMesh: THREE.Group;
 
   private constructor(canvas: HTMLCanvasElement, status: HTMLElement, url: string) {
     this.status = status;
@@ -43,7 +56,8 @@ export class NetGame {
     this.net = new NetClient(url);
 
     this.render = createRenderer(canvas);
-    this.render.scene.add(buildArenaMesh());
+    this.arenaMesh = buildArenaMesh();
+    this.render.scene.add(this.arenaMesh);
     this.render.scene.add(buildStadium(buildArenaLayout()).group);
     this.ballMesh = createBallMesh();
     this.render.scene.add(this.ballMesh);
@@ -60,6 +74,7 @@ export class NetGame {
   static async create(canvas: HTMLCanvasElement, status: HTMLElement, url: string): Promise<NetGame> {
     await initPhysics();
     const game = new NetGame(canvas, status, url);
+    game.net.onRound = (round) => game.onRound(round);
     game.net.connect(() => game.onWelcome());
     return game;
   }
@@ -75,6 +90,25 @@ export class NetGame {
    */
   private onWelcome(): void {
     this.say('connected, waiting for the first snapshot');
+  }
+
+  /** A new round: take the server's tuning, and rebuild if the goals moved. */
+  private onRound(round: { config: Record<string, number>; rebuildArena: boolean }): void {
+    this.roundConfig.revert();
+    this.roundConfig.apply(round.config);
+    this.sim.syncConfig();
+    if (round.rebuildArena) {
+      this.sim.rebuildArena();
+      this.render.scene.remove(this.arenaMesh);
+      disposeArenaMesh(this.arenaMesh);
+      this.arenaMesh = buildArenaMesh();
+      this.render.scene.add(this.arenaMesh);
+    }
+  }
+
+  /** Takes an offered upgrade. Only the host's choice is acted on. */
+  choose(index: number): void {
+    this.net.choose(index);
   }
 
   /** Builds local cars to match the count the server is sending. */
@@ -128,11 +162,19 @@ export class NetGame {
         grounded: car.grounded,
         normal: car.groundNormal,
       });
+      const run = this.net.run;
+      const round = this.net.round;
+      const head = round ? `Round ${round.index} — ${round.label}` : 'connecting';
+      const score = this.net.score;
+      const between =
+        run && run.phase === 'between'
+          ? ` · pick: ${run.offer.map((name, i) => `[${i + 1}] ${name}`).join('  ')}`
+          : '';
+      const over = run && run.phase === 'over' ? ' · RUN OVER' : '';
       this.say(
-        `car ${index} · ${Math.round(car.speed)} uu/s · ` +
-          `${this.net.stats.pending} unacked · ` +
-          `replayed ${this.net.stats.lastReplay} · ` +
-          `off by ${this.net.stats.lastError.toFixed(1)} uu`,
+        `${head} · ${score[0]}–${score[1]} · ${Math.round(this.net.clock)}s` +
+          ` · car ${index} · ${Math.round(car.speed)} uu/s` +
+          ` · off by ${this.net.stats.lastError.toFixed(1)} uu${between}${over}`,
       );
     }
     this.render.draw();

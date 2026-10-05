@@ -1,8 +1,18 @@
 import { Simulation } from '../sim/simulation';
-import { buildRound } from '../state/round';
+import { Run } from '../state/run';
+import { needsArenaRebuild } from '../state/modifiers';
+import { ConfigOverrides } from '../state/configOverride';
+import { applyUpgrades } from '../state/upgrades';
+import { resetModifiers } from '../physics/car';
+import type { RoundSpec } from '../state/round';
 import { emptyInput, type CarInput } from '../input/types';
-
-import type { BodyState, ServerMessage, SnapshotMessage } from './protocol';
+import type {
+  BodyState,
+  RoundMessage,
+  RunMessage,
+  ServerMessage,
+  SnapshotMessage,
+} from './protocol';
 
 /**
  * The authoritative game, with no transport attached.
@@ -43,6 +53,16 @@ export class GameServer {
   private nextId = 1;
   private tick = 0;
 
+  /** The gauntlet. The server owns it, so nobody can disagree about the round. */
+  readonly run: Run;
+  private readonly roundOverrides = new ConfigOverrides();
+  private readonly runOverrides = new ConfigOverrides();
+  private spec: RoundSpec | null = null;
+  private rebuiltArena = false;
+  /** Set when the round changed, so the next broadcast carries it. */
+  private pendingRound: RoundMessage | null = null;
+  private runDirty = true;
+
   constructor(private readonly options: ServerOptions = {}) {
     const random = options.random ?? Math.random;
     this.sim = new Simulation(random);
@@ -52,12 +72,127 @@ export class GameServer {
     // to be announced, and there is no message for that yet.
     const seats = options.maxClients ?? 2;
     for (let i = 0; i < seats; i++) this.sim.addCar(0, i, null);
+    this.seats = seats;
 
-    const spec = buildRound(1, random);
-    const lineup = spec.lineup.slice(0, options.botOpponents ?? 0);
-    this.sim.setOpponents(lineup);
-    this.sim.startMatch(spec.rules, { onKickoff: () => this.sim.resetKickoff() });
+    this.run = new Run(
+      {
+        onRoundStart: (spec) => this.applyRound(spec),
+        onRunOver: () => {
+          this.runDirty = true;
+        },
+      },
+      random,
+    );
+    this.run.start();
+  }
+
+  private readonly seats: number;
+
+  /**
+   * Sets the world up for a round: modifiers, upgrades, arena, opposition.
+   *
+   * The same sequence the single-player game runs, for the same reason — each
+   * layer has to be unwound in the reverse of the order it went on, or a round
+   * inherits whatever the last one left behind.
+   */
+  private applyRound(spec: RoundSpec): void {
+    this.spec = spec;
+    this.runOverrides.revert();
+    this.roundOverrides.revert();
+    for (const mod of spec.modifiers) mod.apply(this.roundOverrides);
+
+    // Upgrades rebuild from standard every round rather than compounding, and
+    // in a shared run they apply to every human car rather than to one.
+    for (let i = 0; i < this.seats; i++) {
+      const seat = this.sim.cars[i];
+      if (!seat) continue;
+      resetModifiers(seat.car.mods);
+      applyUpgrades(this.run.upgrades, { mods: seat.car.mods, overrides: this.runOverrides });
+    }
+
+    const rebuild = needsArenaRebuild(spec.modifiers) || this.rebuiltArena;
+    if (rebuild) {
+      this.sim.rebuildArena();
+      this.rebuiltArena = needsArenaRebuild(spec.modifiers);
+    }
+
+    this.sim.setOpponents(spec.lineup.slice(0, this.options.botOpponents ?? spec.lineup.length));
+    this.sim.syncConfig();
+    this.sim.startMatch(spec.rules, {
+      onKickoff: () => this.sim.resetKickoff(),
+      onEnd: (result) => this.run.finishRound(result, this.sim.match.playedSeconds),
+    });
     this.sim.resetKickoff();
+
+    this.pendingRound = {
+      type: 'round',
+      index: spec.index,
+      label: spec.label,
+      isBoss: spec.isBoss,
+      // The numbers in force, not the names they came from.
+      config: { ...this.roundOverrides.effective(), ...this.runOverrides.effective() },
+      rebuildArena: rebuild,
+    };
+    this.runDirty = true;
+  }
+
+  /** The round message, once, for whoever has not had it. */
+  takeRoundMessage(): RoundMessage | null {
+    const message = this.pendingRound;
+    this.pendingRound = null;
+    return message;
+  }
+
+  /** The round message again, for a client that just joined. */
+  currentRound(): RoundMessage | null {
+    if (!this.spec) return null;
+    return {
+      type: 'round',
+      index: this.spec.index,
+      label: this.spec.label,
+      isBoss: this.spec.isBoss,
+      config: { ...this.roundOverrides.effective(), ...this.runOverrides.effective() },
+      rebuildArena: this.rebuiltArena,
+    };
+  }
+
+  /** Run state, when it has changed since it was last asked for. */
+  takeRunMessage(): RunMessage | null {
+    if (!this.runDirty) return null;
+    this.runDirty = false;
+    return this.runState();
+  }
+
+  runState(): RunMessage {
+    return {
+      type: 'run',
+      phase: this.run.phase,
+      round: this.run.round,
+      roundsCleared: this.run.stats.roundsCleared,
+      offer: this.run.offer.map((u) => u.name),
+      taken: this.run.upgrades.map((u) => u.name),
+      chooser: this.run.phase === 'between' ? this.hostId() : null,
+    };
+  }
+
+  /**
+   * Who picks an upgrade.
+   *
+   * The lowest client id still connected — whoever has been here longest. In a
+   * shared run somebody has to choose, and picking the host is the only rule
+   * that needs no negotiation and cannot deadlock when someone leaves.
+   */
+  private hostId(): number | null {
+    const ids = [...this.clients.keys()].sort((a, b) => a - b);
+    return ids[0] ?? null;
+  }
+
+  /** Takes an offered upgrade, if this client is the one allowed to. */
+  choose(id: number, index: number): void {
+    if (id !== this.hostId()) return;
+    if (this.run.phase !== 'between') return;
+    this.run.choose(index);
+    this.runDirty = true;
   }
 
   get clientCount(): number {

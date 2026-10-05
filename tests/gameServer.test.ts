@@ -102,7 +102,8 @@ describe('a client is not trusted', () => {
         input: { throttle: 1e9, steer: -50, boost: 'yes', jumpPressed: 1 },
       }),
     );
-    expect(message).not.toBeNull();
+    expect(message?.type).toBe('input');
+    if (message?.type !== 'input') throw new Error('expected an input message');
     // Out-of-range axes are clamped, and anything that is not `true` is false:
     // without this, a client that sends throttle 1e9 gets a car nobody else can
     // have, which is the cheapest cheat there is.

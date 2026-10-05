@@ -125,3 +125,19 @@ describe('prediction', () => {
     expect(sim.match.clock).toBe(before);
   });
 });
+
+describe('when the server goes quiet', () => {
+  it('does not let the input history grow without bound', () => {
+    // Nothing acknowledges these. Unbounded, the list would grow for as long as
+    // the page is open and every correction would replay all of it.
+    const { client, sim } = pair();
+    for (let i = 0; i < 2000; i++) client.send(drive());
+    expect(client.stats.pending).toBeLessThanOrEqual(240);
+
+    // And a correction after that is still bounded work.
+    const { server, id } = pair();
+    client.ingest(server.snapshotFor(id));
+    client.reconcile(sim);
+    expect(client.stats.lastReplay).toBeLessThanOrEqual(240);
+  });
+});

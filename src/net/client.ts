@@ -4,6 +4,8 @@ import {
   decodeServer,
   encode,
   type BodyState,
+  type RoundMessage,
+  type RunMessage,
   type ServerMessage,
   type SnapshotMessage,
 } from '../server/protocol';
@@ -28,6 +30,9 @@ import {
  * on both ends, so a prediction and the authority it is checked against cannot
  * disagree about the rules.
  */
+
+/** Two seconds of input at the simulation rate. */
+const MAX_UNACKED = 240;
 
 export interface PendingInput {
   seq: number;
@@ -65,6 +70,13 @@ export class NetClient {
   private readonly unacked: PendingInput[] = [];
   private latest: SnapshotMessage | null = null;
   private lastCarCount = 0;
+  private lastClock = 0;
+  private lastScore: [number, number] = [0, 0];
+  /** The round in force, and the run around it. Null until the server says. */
+  round: RoundMessage | null = null;
+  run: RunMessage | null = null;
+  /** Fired when a new round arrives, so the client can rebuild to match. */
+  onRound: ((round: RoundMessage) => void) | null = null;
   private connected = false;
 
   constructor(private readonly url: string) {}
@@ -89,6 +101,21 @@ export class NetClient {
     };
   }
 
+  /** Match clock and score from the last snapshot, for the read-out. */
+  get clock(): number {
+    return this.lastClock;
+  }
+  get score(): [number, number] {
+    return this.lastScore;
+  }
+
+  /** Takes an offered upgrade. The server ignores it unless we are the host. */
+  choose(index: number): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(encode({ type: 'choose', index }));
+    }
+  }
+
   /**
    * Takes a server message, whether it came from a socket or a test.
    *
@@ -102,8 +129,19 @@ export class NetClient {
       onReady?.();
       return;
     }
+    if (message.type === 'round') {
+      this.round = message;
+      this.onRound?.(message);
+      return;
+    }
+    if (message.type === 'run') {
+      this.run = message;
+      return;
+    }
     this.latest = message;
     this.lastCarCount = message.cars.length;
+    this.lastClock = message.clock;
+    this.lastScore = message.score;
   }
 
   disconnect(): void {
@@ -122,6 +160,14 @@ export class NetClient {
   send(input: CarInput): PendingInput {
     const pending = { seq: ++this.seq, input: { ...input } };
     this.unacked.push(pending);
+    // Capped, because nothing else bounds it. If the server stops
+    // acknowledging — it went away, or this tab was backgrounded long enough
+    // for the socket to stall — this list otherwise grows for as long as the
+    // page is open, and every reconcile replays all of it. Two seconds of
+    // inputs is far more than any correction legitimately needs, and dropping
+    // the oldest is right: they are the ones the server is least likely to
+    // still be waiting for.
+    while (this.unacked.length > MAX_UNACKED) this.unacked.shift();
     this.stats.pending = this.unacked.length;
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(encode({ type: 'input', seq: pending.seq, input }));

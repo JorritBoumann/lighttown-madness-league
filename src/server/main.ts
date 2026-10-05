@@ -40,12 +40,17 @@ async function main(): Promise<void> {
     const { handle, welcome } = joined;
     sockets.set(handle.id, socket);
     socket.send(encode(welcome));
+    // A client joining mid-run needs the round it is joining, not the next one.
+    const round = game.currentRound();
+    if (round) socket.send(encode(round));
+    socket.send(encode(game.runState()));
     log(`client ${handle.id} joined as car ${handle.carIndex} (${game.clientCount}/${SEATS})`);
 
     socket.on('message', (data) => {
       const message = decodeClient(String(data));
       if (!message) return;
-      game.onInput(handle.id, message.seq, message.input);
+      if (message.type === 'input') game.onInput(handle.id, message.seq, message.input);
+      else game.choose(handle.id, message.index);
     });
 
     const drop = (): void => {
@@ -81,6 +86,20 @@ async function main(): Promise<void> {
       // carrying it, or every later frame pays for one bad one.
       accumulator = 0;
       log('fell behind; dropped the backlog');
+    }
+
+    // Round and run changes go out the moment they happen rather than waiting
+    // for the snapshot tick: a round change rebuilds the client's arena, and
+    // doing that a frame late means a frame simulated against the wrong one.
+    const roundChange = game.takeRoundMessage();
+    const runChange = game.takeRunMessage();
+    if (roundChange || runChange) {
+      for (const id of game.clientIds()) {
+        const socket = sockets.get(id);
+        if (!socket || socket.readyState !== socket.OPEN) continue;
+        if (roundChange) socket.send(encode(roundChange));
+        if (runChange) socket.send(encode(runChange));
+      }
     }
 
     if (sinceSnapshot >= snapshotEvery) {

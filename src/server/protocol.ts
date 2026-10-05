@@ -58,7 +58,47 @@ export interface SnapshotMessage {
   score: [number, number];
 }
 
-export type ServerMessage = WelcomeMessage | SnapshotMessage;
+/**
+ * The round everyone is playing, and the exact tuning it runs under.
+ *
+ * `config` carries values rather than modifier names on purpose. Two machines
+ * deriving the same numbers from the same names is a thing that works until one
+ * of them is a version behind; two machines told the same numbers is not. These
+ * decide where the ball goes, so a client even slightly out would mispredict
+ * every touch it made.
+ */
+export interface RoundMessage {
+  type: 'round';
+  index: number;
+  label: string;
+  isBoss: boolean;
+  /** `group.key` to value, applied over the client's own defaults. */
+  config: Record<string, number>;
+  /** True when goal dimensions changed and the arena must be rebuilt. */
+  rebuildArena: boolean;
+}
+
+/** Where the run is, and what is on offer between rounds. */
+export interface RunMessage {
+  type: 'run';
+  phase: 'idle' | 'round' | 'between' | 'over';
+  round: number;
+  roundsCleared: number;
+  /** Upgrade names on offer, when the run is between rounds. */
+  offer: string[];
+  /** Upgrades already taken. */
+  taken: string[];
+  /** Which client may choose. Null when nobody needs to. */
+  chooser: number | null;
+}
+
+export type ServerMessage = WelcomeMessage | SnapshotMessage | RoundMessage | RunMessage;
+
+/** A client taking one of the offered upgrades. */
+export interface ChooseMessage {
+  type: 'choose';
+  index: number;
+}
 
 export interface InputMessage {
   type: 'input';
@@ -67,7 +107,7 @@ export interface InputMessage {
   input: CarInput;
 }
 
-export type ClientMessage = InputMessage;
+export type ClientMessage = InputMessage | ChooseMessage;
 
 export function encode(message: ServerMessage | ClientMessage): string {
   return JSON.stringify(message);
@@ -86,7 +126,9 @@ export function decodeServer(raw: string): ServerMessage | null {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return null;
     const m = parsed as { type?: unknown };
-    if (m.type !== 'welcome' && m.type !== 'snapshot') return null;
+    if (m.type !== 'welcome' && m.type !== 'snapshot' && m.type !== 'round' && m.type !== 'run') {
+      return null;
+    }
     return parsed as ServerMessage;
   } catch {
     return null;
@@ -99,6 +141,13 @@ export function decodeClient(raw: string): ClientMessage | null {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return null;
     const m = parsed as Record<string, unknown>;
+    if (m.type === 'choose') {
+      const index = m.index;
+      if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index > 8) {
+        return null;
+      }
+      return { type: 'choose', index };
+    }
     if (m.type !== 'input') return null;
     if (typeof m.seq !== 'number' || !Number.isFinite(m.seq)) return null;
     if (typeof m.input !== 'object' || m.input === null) return null;

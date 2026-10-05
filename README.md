@@ -1105,7 +1105,12 @@ Then open `net.html` against it:
 http://127.0.0.1:5173/net.html?server=ws://localhost:8080
 ```
 
-Open it twice and the two browsers see each other. It is a separate page from
+Open it twice and the two browsers play the same gauntlet run: same round, same
+score, a car each, and the opposition the round called for. The run lives on the
+server, because a run is a sequence of decisions — which round, which modifiers,
+which upgrades — and two clients deciding those separately is two different
+games being played at once. Between rounds the upgrade is picked by whoever has
+been connected longest, and it applies to every human car rather than to one. It is a separate page from
 the game on purpose: the single-player one owns a run, upgrades and round
 modifiers, all of which the server would have to own instead, and this is the
 smallest thing that proves the protocol.

@@ -65,6 +65,21 @@ export class ConfigOverrides {
     return [...this.baseline.keys()];
   }
 
+  /**
+   * The values currently in force, as a patch.
+   *
+   * This is what a networked client needs. Sending the *names* of the modifiers
+   * and letting each end work out the numbers means two machines computing the
+   * same thing and having to agree; sending the numbers means there is nothing
+   * to disagree about. Gravity and ball mass decide where the ball goes, so a
+   * client that got them slightly wrong would mispredict every touch.
+   */
+  effective(): Patch {
+    const patch: Patch = {};
+    for (const path of this.baseline.keys()) patch[path] = read(path);
+    return patch;
+  }
+
   /** Puts everything back as it was. */
   revert(): void {
     for (const [path, value] of this.baseline) write(path, value);
