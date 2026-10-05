@@ -539,6 +539,27 @@ export const config = {
     carModel: 'assets/car.glb',
   },
 
+  /** Trails behind the ball and behind a supersonic car. */
+  trails: {
+    /** Ball speed at which the trail starts to show, and where it is at full
+     *  strength. Faded in across the range rather than snapped on, so it does
+     *  not blink in and out as the ball hovers around a threshold. */
+    ballFrom: 900,
+    ballFull: 2600,
+    ballWidth: 74,
+    ballSegments: 26,
+    /** Seconds between trail samples. With the segment counts above this is
+     *  how long the tail is in time: about half a second. */
+    sampleInterval: 0.022,
+    /** A jump bigger than this is a kickoff reset, not a shot. */
+    teleport: 900,
+    /** The streak off a supersonic car. */
+    carWidth: 34,
+    carSegments: 20,
+    /** How far below supersonic the car's streak starts to appear. */
+    carFadeRange: 260,
+  },
+
   /** The goal celebration. See render/goalMoment.ts. */
   goal: {
     /** A dead stop on contact, and how slow it runs during it. */
@@ -574,6 +595,10 @@ export const config = {
      * it clears for the moment and comes back afterwards.
      */
     mouthClear: 0.25,
+    /** The ring thrown off when a car first goes supersonic. */
+    sonicRingSeconds: 0.42,
+    sonicRingRadius: 420,
+    sonicRingOpacity: 0.55,
     /** How long the crowd keeps going. */
     crowdSeconds: 2.4,
     /** When the whole thing is over and everything is put back. */

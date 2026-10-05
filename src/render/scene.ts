@@ -35,7 +35,9 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   const scaler = new ResolutionScaler(Math.min(devicePixelRatio, 2));
   renderer.setPixelRatio(scaler.scale);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // PCFSoft was removed in this version of three and silently downgraded,
+  // which meant a warning on every boot for a setting that was not applying.
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   // Filmic tone mapping rather than three's default clamp. Without it the
   // bright end crushes to white and everything in shadow reads as the same
   // flat navy, which is most of why the first version looked washed out.

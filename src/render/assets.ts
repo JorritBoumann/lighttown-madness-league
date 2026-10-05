@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { cfg } from '../config';
 
 /**
@@ -31,10 +31,22 @@ export interface GameAssets {
 
 export const EMPTY_ASSETS: GameAssets = { environment: null, carModel: null };
 
+/**
+ * Whether a file is really there.
+ *
+ * A 200 is not enough. A dev server with a single-page fallback answers every
+ * unknown path with `index.html` and a 200, so the probe said yes for files
+ * that do not exist and the loaders were handed HTML — "Bad File Format: bad
+ * initial token" from the radiance loader, and `Unexpected token '<'` from the
+ * model loader, on every boot. The content type is what distinguishes a real
+ * asset from the index page wearing its name.
+ */
 async function present(url: string): Promise<boolean> {
   try {
     const res = await fetch(url, { method: 'HEAD' });
-    return res.ok;
+    if (!res.ok) return false;
+    const type = res.headers.get('content-type') ?? '';
+    return !type.includes('text/html');
   } catch {
     return false;
   }
@@ -89,7 +101,7 @@ export async function loadAssets(renderer: THREE.WebGLRenderer): Promise<GameAss
 
   if (hasEnv) {
     try {
-      const hdr = await new RGBELoader().loadAsync(cfg.assets.environment);
+      const hdr = await new HDRLoader().loadAsync(cfg.assets.environment);
       // A radiance map has to be prefiltered before it can light anything;
       // handing the raw equirect straight to scene.environment gives hard,
       // wrong reflections.

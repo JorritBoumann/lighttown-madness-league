@@ -20,6 +20,8 @@ import {
 import { buildStadium, type Stadium } from './render/stadium';
 import { loadAssets, EMPTY_ASSETS, type GameAssets } from './render/assets';
 import { GoalMoment } from './render/goalMoment';
+import { Ribbon } from './render/ribbon';
+import { clamp } from './core/mathx';
 import { buildArenaLayout } from './core/arenaLayout';
 import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
 import { ChaseCamera } from './render/chaseCamera';
@@ -54,6 +56,10 @@ interface CarEntry {
   mesh: THREE.Group;
   interp: TransformInterpolator;
   flame: THREE.Mesh;
+  /** The streak that appears as the car approaches supersonic. */
+  streak: Ribbon;
+  /** Tracks the crossing, so the shock ring fires once rather than per frame. */
+  wasSupersonic: boolean;
   /** Null for the player. */
   bot: Bot | null;
   spawn: Spawn;
@@ -83,6 +89,12 @@ export class Game {
   private readonly assets: GameAssets;
   /** The goal celebration, which also owns the slow motion. */
   private readonly goalMoment: GoalMoment;
+  /** The ball's trail. */
+  private readonly ballTrail: Ribbon;
+  /** The ring thrown off when a car crosses into supersonic. */
+  private readonly sonicRing: THREE.Mesh;
+  private readonly sonicRingMaterial: THREE.MeshBasicMaterial;
+  private sonicRingClock = 0;
   private readonly ball: Ball;
   private readonly pads: BoostPads;
   private readonly carBall = new CarBallInteraction();
@@ -190,6 +202,32 @@ export class Game {
     this.runHud.showBest(this.run.best);
     // The game opens on the title screen rather than mid-round: a run should
     // start because the player asked for one.
+    // Before the first round is applied: applying a round sets up a kickoff,
+    // which clears the trails, and a kickoff that runs before they exist takes
+    // the whole game down on boot.
+    this.ballTrail = new Ribbon({
+      segments: cfg.trails.ballSegments,
+      width: cfg.trails.ballWidth,
+      colour: new THREE.Color(0x9fd8ff),
+      sampleInterval: cfg.trails.sampleInterval,
+      teleport: cfg.trails.teleport,
+    });
+    this.render.scene.add(this.ballTrail.mesh);
+
+    this.sonicRingMaterial = new THREE.MeshBasicMaterial({
+      color: 0xdff1ff,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
+    this.sonicRing = new THREE.Mesh(new THREE.RingGeometry(0.76, 1, 40), this.sonicRingMaterial);
+    this.sonicRing.visible = false;
+    this.render.scene.add(this.sonicRing);
+
+
     this.applyRound(buildRound(1, Math.random));
     // One poll before the title screen is drawn, so a pad that is already
     // connected is reported as such instead of only after the first frame.
@@ -245,9 +283,20 @@ export class Game {
       : createCarMesh(TEAM_COLOUR[team]);
     this.render.scene.add(mesh);
 
+    const streak = new Ribbon({
+      segments: cfg.trails.carSegments,
+      width: cfg.trails.carWidth,
+      colour: new THREE.Color(botLevel === null ? 0xcfe9ff : 0xffd2b0),
+      sampleInterval: cfg.trails.sampleInterval,
+      teleport: cfg.trails.teleport,
+    });
+    this.render.scene.add(streak.mesh);
+
     const entry: CarEntry = {
       car,
       mesh,
+      streak,
+      wasSupersonic: false,
       interp: new TransformInterpolator(mesh),
       flame: mesh.getObjectByName('flame') as THREE.Mesh,
       bot: botLevel === null ? null : new Bot(car, botLevel, Math.random, role),
@@ -382,6 +431,14 @@ export class Game {
     this.ball.reset();
     this.pads.resetAll();
     this.ballInterp.snap(this.ball.position, this.ball.body.rotation());
+    // Everything has just teleported to its kickoff spot. The ribbons guard
+    // against a jump on their own, but clearing here means not even one frame
+    // of a streak drawn from where the ball was to where it now is.
+    this.ballTrail.clear();
+    for (const entry of this.entries) {
+      entry.streak.clear();
+      entry.wasSupersonic = false;
+    }
     this.chase.snapTo(this.player.car.position, this.player.car.forward());
   }
 
@@ -555,6 +612,7 @@ export class Game {
     // render delta, which is the frame time whatever the physics did inside it.
     this.render.pace(dt * 1000);
 
+    this.updateTrails(dt);
     this.goalMoment.update(dt);
 
     this.stadium.update(dt, {
@@ -769,6 +827,54 @@ export class Game {
         spread: 90,
         drag: 2.0,
       });
+    }
+  }
+
+  /**
+   * Trails behind the ball and behind a car at speed, and the ring a car
+   * throws off as it goes supersonic.
+   *
+   * Faded in across a range rather than switched on at a threshold: a trail
+   * that appears the instant a number is crossed blinks on and off while the
+   * speed hovers there, which reads as a fault rather than as speed.
+   */
+  private updateTrails(dt: number): void {
+    const t = cfg.trails;
+    const camera = this.render.camera;
+
+    const bv = this.ball.velocity;
+    const ballSpeed = Math.hypot(bv.x, bv.y, bv.z);
+    const ballStrength = clamp((ballSpeed - t.ballFrom) / (t.ballFull - t.ballFrom), 0, 1);
+    this.ballTrail.update(dt, this.ballMesh.position, camera, ballStrength);
+
+    for (const entry of this.entries) {
+      const speed = entry.car.speed;
+      const from = cfg.car.supersonicSpeed - t.carFadeRange;
+      const strength = clamp((speed - from) / t.carFadeRange, 0, 1);
+      entry.streak.update(dt, entry.mesh.position, camera, strength);
+
+      // The ring fires on the crossing, not while above it.
+      const now = entry.car.isSupersonic;
+      if (now && !entry.wasSupersonic) {
+        const p = entry.mesh.position;
+        this.sonicRing.position.set(p.x, p.y, p.z);
+        this.sonicRing.quaternion.copy(camera.quaternion);
+        this.sonicRing.visible = true;
+        this.sonicRingClock = 0;
+      }
+      entry.wasSupersonic = now;
+    }
+
+    if (this.sonicRing.visible) {
+      this.sonicRingClock += dt;
+      const ring = this.sonicRingClock / cfg.goal.sonicRingSeconds;
+      if (ring >= 1) {
+        this.sonicRing.visible = false;
+        this.sonicRingMaterial.opacity = 0;
+      } else {
+        this.sonicRing.scale.setScalar(Math.max(1, cfg.goal.sonicRingRadius * ring));
+        this.sonicRingMaterial.opacity = (1 - ring) ** 2 * cfg.goal.sonicRingOpacity;
+      }
     }
   }
 

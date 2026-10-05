@@ -451,6 +451,28 @@ point nothing obviously points at the arena.
 The bundle carries roughly 20kB gzipped for three's postprocessing and geometry
 utilities.
 
+## Trails
+
+The ball leaves a streak when it is moving, and a car leaves one as it
+approaches supersonic, with a ring thrown off at the crossing. Both are the
+same camera-facing ribbon built from a ring buffer of recent positions: a line
+has no width to taper, and the taper from full width at the head to nothing at
+the tail is most of what makes a trail read as motion rather than as a rope
+being dragged.
+
+Both fade in across a speed range rather than switching on at a threshold. A
+trail that appears the instant a number is crossed blinks on and off while the
+speed hovers there, which reads as a fault rather than as speed.
+
+**Samples are taken on time, not on distance travelled**, and the first version
+got that wrong in a way worth recording. Sampling on distance ties the trail to
+the frame rate twice over. A threshold large enough to avoid degenerate
+segments stops a fast object recording anything at all on a high refresh rate —
+at 120fps a ball at full speed moves 21 units a frame, which never cleared the
+26 unit step, so the trail never appeared. And where it does work, the tail
+comes out longer on a slow machine than a fast one. On a fixed interval the
+tail is the same length in seconds everywhere, which is what the tests check.
+
 ## The goal moment
 
 Scoring used to be a number changing: a camera kick, one burst of particles, and
