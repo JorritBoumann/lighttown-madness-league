@@ -106,6 +106,50 @@ Two interchangeable ways to change any of it, both live:
 The throttle and steering curves are lookup tables rather than single numbers,
 so they live in the file rather than on a slider.
 
+## Walls and the ceiling
+
+Driving up a wall and carrying on onto the ceiling both work, and both were
+broken for unrelated reasons that only measuring found.
+
+**The floor-wall seam was eating the speed.** A car crossing it at 2300 arrived
+with all of that pointing horizontally, the surface turned ninety degrees under
+it, and the contact absorbed the part of the velocity now heading into the ramp.
+Measured, it left the seam at 719 — two thirds of the speed gone into the wall —
+and nothing it did afterwards could climb 2000 units. The velocity is now turned
+onto the new surface before the contact gets to flatten it, keeping its
+magnitude instead of its direction.
+
+Two traps in that, both found by measurement:
+
+- **A fractional carry factor compounds.** `0.94` looks like a reasonable "a
+  transition should cost something" knob, and it applies on every frame the
+  velocity is being turned: a tenth of a second at 120Hz is `0.94` to the
+  twelfth, which is under half the speed. It reached 1365 up the wall against
+  1996 for keeping the speed exactly. There is no factor any more.
+- **It must only fire on a real transition.** The suspension leaves a few units
+  a second of motion into the floor every frame, and rescaling the speed around
+  that fights the damping — the ride height went from holding inside three units
+  to wandering over four. There is a threshold, and a test on the ride height.
+
+**The wall-ceiling seam did not exist.** The floor-wall join has a 45-degree
+chamfer; the top of the wall was a square right angle, so a car climbed
+perfectly, arrived at the top and had nothing to roll over. Both seams are now
+generated from the same figures, so they cannot drift apart. At the ends the
+upper seam is one piece rather than the two the floor needs either side of the
+goal mouth: reusing the split up there leaves a hole in the middle of the seam
+exactly where a car driving down the pitch arrives.
+
+**And gravity beats the stick force on a ceiling.** Stick is 325 and gravity is
+650, so an overhead surface peeled the car away at 325 whatever it did. The
+component of gravity that peels the car off a surface is now cancelled, which is
+nothing on the floor and nothing on a vertical wall — gravity slides you down a
+wall, it does not pull you off one — so only the ceiling changes.
+
+Where it ends up: a boosted approach from 600 uu/s or more gets fully onto the
+ceiling and drives there, an unboosted 2000 gets most of the way over, and
+trundling at the wall at 600 puts you part way up and no further, which is what
+stops every loose ball turning into a wall drive.
+
 ## Match rules
 
 Set in the `match` block of [`src/config.ts`](src/config.ts): 90 seconds, first

@@ -441,6 +441,45 @@ export class Car {
     const lv = this.body.linvel();
     this.vel.set(lv.x, lv.y, lv.z);
 
+    // Carry speed through a change of surface.
+    //
+    // This is what makes driving up a wall work. A car crossing the floor-wall
+    // seam at 2300 arrives with all its speed horizontal, the surface turns
+    // ninety degrees under it, and the contact absorbs the part of the velocity
+    // that now points into the ramp: measured, it left the seam at 719, having
+    // thrown away two thirds of its speed into the wall. Nothing it did after
+    // that could climb.
+    //
+    // So the velocity is turned into the new surface plane before the contact
+    // gets to flatten it, keeping its magnitude rather than its direction. On
+    // flat ground it does nothing at all — the velocity is already in the plane
+    // — which is why this does not touch how the car feels on the floor.
+    const speedBefore = this.vel.length();
+    if (speedBefore > 1) {
+      const intoSurface = this.vel.dot(n);
+      // Only a real change of surface, not the suspension breathing. On flat
+      // ground the spring and damper leave a few units a second of motion into
+      // the floor every frame, and rescaling the speed back up around that
+      // fights the damping: it took the ride height from holding inside three
+      // units to wandering over four.
+      if (intoSurface < -c.surfaceTurnThreshold) {
+        this.vel.addScaledVector(n, -intoSurface);
+        const after = this.vel.length();
+        if (after > 1) {
+          // Exactly the speed it arrived with, not a fraction of it. A factor
+          // here looks like a reasonable "transitions should cost something"
+          // knob and is a trap: it applies every frame the velocity is being
+          // turned, so at 120Hz a tenth of a second of 0.94 is 0.94 to the
+          // twelfth, which is less than half the speed. Measured, 0.94 reached
+          // 1365 up the wall and 1.0 reached 1996 and carried on to the
+          // ceiling. Transitions cost something anyway, through gravity and
+          // the grip below.
+          this.vel.multiplyScalar(speedBefore / after);
+        }
+        this.body.setLinvel({ x: this.vel.x, y: this.vel.y, z: this.vel.z }, true);
+      }
+    }
+
     // Work in the surface plane, so this all holds on walls and the ceiling.
     const planeFwd = this.tmp.copy(this.fwd).addScaledVector(n, -this.fwd.dot(n)).normalize();
     const planeRight = this.tmp2.copy(this.right).addScaledVector(n, -this.right.dot(n)).normalize();
@@ -479,6 +518,21 @@ export class Car {
 
     // Press into the surface so the car holds walls and the seam ramps.
     this.vel.addScaledVector(n, -c.stickForce * dt);
+
+    // And cancel the part of gravity that peels the car off the surface, so
+    // the stick force above is holding the car rather than fighting a losing
+    // battle with the weight of it.
+    //
+    // On the floor this is nothing and on a vertical wall it is nothing:
+    // gravity slides you down a wall, it does not pull you off it. It only
+    // matters where the surface is overhead, which is exactly where the car
+    // could not stay before — stick force is 325 and gravity is 650, so the
+    // ceiling peeled the car away at 325 whatever it did.
+    const peel = Math.max(0, -n.y);
+    if (peel > 0) {
+      const gravity = -cfg.physics.gravity;
+      this.vel.addScaledVector(n, -gravity * peel * c.ceilingStick * dt);
+    }
 
     this.body.setLinvel({ x: this.vel.x, y: this.vel.y, z: this.vel.z }, true);
 

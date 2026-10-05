@@ -153,15 +153,55 @@ export function buildArenaLayout(): ArenaLayout {
     const mid = ch / 2;
     const k = Math.SQRT1_2 * THICK;
 
-    for (const s of [1, -1]) {
-      panels.push({
-        pos: { x: 0, y: mid - k, z: s * (hw - mid) + s * k },
-        half: { x: wallEndX, y: THICK, z: span },
-        yaw: 0,
-        pitch: (-s * Math.PI) / 4,
-        axis: 'x',
-        kind: 'ramp',
-      });
+    // Both seams, floor-to-wall and wall-to-ceiling, from the same figures.
+    //
+    // The ceiling seam was missing, and that is what stopped a car getting onto
+    // the ceiling at all: it climbed the wall perfectly, arrived at a square
+    // right angle at the top and had nothing to roll over. Rocket League curves
+    // that corner exactly as it curves the one at the floor.
+    //
+    // `at` is where the ramp's surface sits in y; `turn` scales the 45-degree
+    // tilt to 135 degrees for the upper seam, which points the surface down and
+    // inward instead of up and inward. The centre is then pushed half a
+    // thickness behind the surface along its own normal, or the leading edge
+    // stands proud as a lip the car cannot climb.
+    const seams: { at: number; turn: number; offsetY: number }[] = [
+      { at: mid, turn: 1, offsetY: -k },
+      { at: ceil - mid, turn: 3, offsetY: k },
+    ];
+
+    for (const seam of seams) {
+      for (const s of [1, -1]) {
+        panels.push({
+          pos: { x: 0, y: seam.at + seam.offsetY, z: s * (hw - mid) + s * k },
+          half: { x: wallEndX, y: THICK, z: span },
+          yaw: 0,
+          pitch: (-s * seam.turn * Math.PI) / 4,
+          axis: 'x',
+          kind: 'ramp',
+        });
+      }
+
+      // The end walls. At the floor these come in two pieces either side of the
+      // goal mouth; at the ceiling there is no mouth to avoid, so one piece
+      // spans the wall. Reusing the split up there would leave a gap in the
+      // middle of the seam exactly where a car driving down the pitch arrives.
+      for (const e of [1, -1]) {
+        if (seam.turn === 3) {
+          panels.push({
+            pos: {
+              x: e * (hl - mid) + e * k,
+              y: seam.at + seam.offsetY,
+              z: 0,
+            },
+            half: { x: span, y: THICK, z: wallEndZ },
+            yaw: 0,
+            pitch: (e * seam.turn * Math.PI) / 4,
+            axis: 'z',
+            kind: 'ramp',
+          });
+        }
+      }
     }
     for (const e of [1, -1]) {
       const sideW = (wallEndZ - gw / 2) / 2;

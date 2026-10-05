@@ -92,6 +92,22 @@ export const config = {
     suspensionDamping: 4.5,
     /** Presses the car into whatever surface it is on, so it holds walls. */
     stickForce: 325,
+    /**
+     * How much of the peeling part of gravity is cancelled on an overhead
+     * surface, so `stickForce` can actually hold the car on the ceiling.
+     *
+     * 1 cancels it exactly, which leaves the ordinary stick force doing the
+     * holding and makes ceiling driving a matter of having the speed to get
+     * there rather than a matter of arithmetic the car cannot win. Below 1 the
+     * ceiling sheds you; above 1 it sucks you up, which reads as a magnet.
+     */
+    ceilingStick: 1,
+    /**
+     * How fast the car has to be heading into a surface before its velocity is
+     * turned onto it rather than absorbed by the contact. Above the suspension
+     * settling into the floor, well below anything a seam produces.
+     */
+    surfaceTurnThreshold: 60,
     surfaceAlignRate: 9,
 
     // --- Jumps, flips and dodges ---

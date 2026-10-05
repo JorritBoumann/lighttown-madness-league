@@ -711,3 +711,114 @@ function trackApex(seconds: number): number {
   }
   return apex;
 }
+
+/**
+ * Driving up the wall and onto the ceiling.
+ *
+ * Both of these were broken for reasons that had nothing to do with each other,
+ * and both were invisible without measuring: the car held a wall perfectly well
+ * but arrived at the top against a square right angle, and it lost two thirds
+ * of its speed crossing the floor-wall seam, which left it nothing to climb
+ * with. The figures in these tests are the ones that caught each.
+ */
+describe('walls and the ceiling', () => {
+  /** Drives at the +z side wall and reports how it got on. */
+  function climb(boost: boolean, startSpeed: number, seconds = 4) {
+    phys = new PhysicsWorld();
+    createArena(phys);
+    ball = new Ball(phys);
+    const y = cfg.car.hitbox.height / 2 + cfg.car.rideHeight;
+    // Nose towards the wall.
+    car = new Car(phys, { x: 0, y, z: -600 }, -Math.PI / 2, 0);
+    car.boost = cfg.boost.max;
+    car.body.setLinvel({ x: 0, y: 0, z: startSpeed }, true);
+
+    const dt = cfg.physics.fixedDt;
+    let highest = 0;
+    let groundedFrames = 0;
+    let lowestUpness = 1;
+    let seamSpeed = Infinity;
+
+    for (let i = 0; i < Math.round(seconds / dt); i++) {
+      car.input = { ...emptyInput(), throttle: 1, boost };
+      car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+
+      if (car.grounded) {
+        groundedFrames++;
+        highest = Math.max(highest, car.position.y);
+        // Roof direction in world space: 1 on the floor, 0 on a wall, -1 on
+        // the ceiling.
+        const q = car.body.rotation();
+        lowestUpness = Math.min(lowestUpness, 1 - 2 * (q.x * q.x + q.z * q.z));
+        // The slowest it gets while crossing the seam, which is the figure
+        // that used to collapse.
+        if (car.position.y > 60 && car.position.y < 400) {
+          seamSpeed = Math.min(seamSpeed, car.speed);
+        }
+      }
+    }
+    return {
+      highest,
+      lowestUpness,
+      seamSpeed,
+      groundedFraction: groundedFrames / Math.round(seconds / dt),
+    };
+  }
+
+  it('stays attached all the way up a wall', () => {
+    const r = climb(true, 1400);
+    expect(r.groundedFraction).toBeGreaterThan(0.95);
+    expect(r.highest).toBeGreaterThan(1500);
+  });
+
+  it('carries speed through the floor-wall seam', () => {
+    // The seam used to take 2300 down to 719, and nothing recovers from that
+    // in the height available. The velocity is turned onto the new surface
+    // instead of being absorbed by the contact.
+    const r = climb(true, 2000);
+    expect(r.seamSpeed).toBeGreaterThan(1100);
+  });
+
+  it('gets all the way onto the ceiling', () => {
+    // Needs both halves: the seam at the top of the wall to roll over, and the
+    // speed to arrive there with. Upness below -0.9 is a car that is properly
+    // inverted and driving, not one standing on a wall.
+    const r = climb(true, 1400);
+    expect(r.lowestUpness).toBeLessThan(-0.9);
+    expect(r.highest).toBeGreaterThan(cfg.arena.ceiling - 120);
+  });
+
+  it('needs speed to get up there, so the wall is not a free ride', () => {
+    // Trundling at the wall should put the car part way up and no further,
+    // or every loose ball becomes a wall drive.
+    const r = climb(false, 600);
+    expect(r.highest).toBeLessThan(900);
+    expect(r.lowestUpness).toBeGreaterThan(0);
+  });
+
+  it('holds a steady ride height on the floor still', () => {
+    // The guard on the fix above. Turning the velocity onto the surface on
+    // every frame, rather than only on a real transition, fights the
+    // suspension damping: the ride height wandered over four units where it
+    // had been holding inside three.
+    phys = new PhysicsWorld();
+    createArena(phys);
+    ball = new Ball(phys);
+    car = new Car(phys, { ...START }, 0, 0);
+    run(1.0, { throttle: 1 });
+    const samples: number[] = [];
+    const dt = cfg.physics.fixedDt;
+    for (let i = 0; i < Math.round(1 / dt); i++) {
+      car.input = { ...emptyInput(), throttle: 1 };
+      car.update(dt);
+      ball.update();
+      phys.step();
+      phys.events.drainCollisionEvents(() => {});
+      samples.push(car.position.y);
+    }
+    expect(Math.max(...samples) - Math.min(...samples)).toBeLessThan(3);
+  });
+});
