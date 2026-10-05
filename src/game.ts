@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { cfg } from './config';
-import { initPhysics, PhysicsWorld, type RAPIER } from './physics/world';
-import { createArena, destroyArena, type Arena } from './physics/arena';
-import { kickoffSpawns, type Spawn } from './core/arenaLayout';
+import { initPhysics, PhysicsWorld } from './physics/world';
+import { type Arena } from './physics/arena';
+import { type Spawn } from './core/arenaLayout';
 import { Ball } from './physics/ball';
 import { Car } from './physics/car';
 import { BoostPads } from './physics/boostPads';
-import { CarBallInteraction } from './physics/carBall';
+import { Simulation, type SimCar } from './sim/simulation';
 import { Controls } from './input/controls';
 import { emptyInput, type CarInput } from './input/types';
 import { Bot, type BotRole } from './ai/bot';
@@ -69,7 +69,6 @@ interface CarEntry {
 }
 
 /** Centre first, then wide, then the inside pair. */
-const SPAWN_ORDER = [4, 2, 3, 0, 1];
 
 const TEAM_COLOUR = { 0: 0x4fc3f7, 1: 0xff7043 } as const;
 
@@ -80,8 +79,21 @@ const TRAIL_COLOUR_BLUE = new THREE.Color(0xffc14d);
 const TRAIL_COLOUR_ORANGE = new THREE.Color(0xff8a50);
 
 export class Game {
-  private readonly phys: PhysicsWorld;
-  private arena: Arena;
+  /**
+   * The game itself, with nothing attached to it.
+   *
+   * Everything below is presentation hanging off it. The accessors are there so
+   * the hundred-odd places that say `this.ball` keep saying `this.ball` — the
+   * point of this split is that there is one simulation, not that every call
+   * site learns a new path to it.
+   */
+  private readonly sim: Simulation;
+  private get phys(): PhysicsWorld {
+    return this.sim.phys;
+  }
+  private get arena(): Arena {
+    return this.sim.arena;
+  }
   private arenaMesh: THREE.Group;
   /**
    * The building around the pitch. Built once: a round modifier can change the
@@ -105,17 +117,27 @@ export class Game {
   private readonly sonicRing: THREE.Mesh;
   private readonly sonicRingMaterial: THREE.MeshBasicMaterial;
   private sonicRingClock = 0;
-  private readonly ball: Ball;
-  private readonly pads: BoostPads;
-  private readonly carBall = new CarBallInteraction();
+  private get ball(): Ball {
+    return this.sim.ball;
+  }
+  private get pads(): BoostPads {
+    return this.sim.pads;
+  }
 
   private readonly entries: CarEntry[] = [];
+  /**
+   * The input handed to the simulation, keyed by car index.
+   *
+   * Reused rather than rebuilt each step, and holding exactly one entry today.
+   * It is a map because that is the shape a networked build needs: several
+   * people's input arriving for several cars.
+   */
+  private readonly playerInput = new Map<number, CarInput>();
   /** Index 0 is always the player. */
   private get player(): CarEntry {
     return this.entries[0]!;
   }
   /** Collider handle to entry, for attributing ball contacts. */
-  private readonly byCollider = new Map<number, CarEntry>();
 
   private readonly render: Renderer;
   private readonly chase: ChaseCamera;
@@ -135,7 +157,9 @@ export class Game {
   private readonly panel: TweakPanel;
   private readonly loop: Loop;
 
-  private match!: Match;
+  private get match(): Match {
+    return this.sim.match;
+  }
   private run: Run;
   /** Set to make a run's modifier picks repeatable; see restartRun. */
   private runSeed: number | null = null;
@@ -173,10 +197,7 @@ export class Game {
   ) {
     this.ui = ui;
     this.assets = assets;
-    this.phys = new PhysicsWorld();
-    this.arena = createArena(this.phys);
-    this.ball = new Ball(this.phys);
-    this.pads = new BoostPads();
+    this.sim = new Simulation();
 
     this.render = render;
     this.arenaMesh = buildArenaMesh();
@@ -290,17 +311,27 @@ export class Game {
     botLevel: number | null,
     role: BotRole = 'balanced',
   ): CarEntry {
-    const spawn = this.spawnFor(team, slot);
-    const car = new Car(this.phys, this.spawnPosition(spawn), spawn.yaw, team);
+    const sim = this.sim.addCar(team, slot, botLevel, role);
+    return this.dressCar(sim, botLevel === null);
+  }
+
+  /**
+   * Builds everything visible that belongs to a simulated car.
+   *
+   * Separate from `addCar` because the opposition is created by the
+   * simulation when a round's lineup changes, and those cars need dressing too.
+   */
+  private dressCar(sim: SimCar, isPlayer: boolean): CarEntry {
+    const car = sim.car;
     const mesh = this.assets.carModel
       ? (this.assets.carModel.clone(true) as THREE.Group)
-      : createCarMesh(TEAM_COLOUR[team]);
+      : createCarMesh(TEAM_COLOUR[car.team]);
     this.render.scene.add(mesh);
 
     const streak = new Ribbon({
       segments: cfg.trails.carSegments,
       width: cfg.trails.carWidth,
-      colour: new THREE.Color(botLevel === null ? 0xcfe9ff : 0xffd2b0),
+      colour: new THREE.Color(isPlayer ? 0xcfe9ff : 0xffd2b0),
       sampleInterval: cfg.trails.sampleInterval,
       teleport: cfg.trails.teleport,
     });
@@ -313,26 +344,12 @@ export class Game {
       wasSupersonic: false,
       interp: new TransformInterpolator(mesh),
       flame: mesh.getObjectByName('flame') as THREE.Mesh,
-      bot: botLevel === null ? null : new Bot(car, botLevel, Math.random, role),
-      spawn,
+      bot: sim.bot,
+      spawn: sim.spawn,
     };
     entry.interp.snap(car.position, car.body.rotation());
     this.entries.push(entry);
-    this.byCollider.set(car.collider.handle, entry);
     return entry;
-  }
-
-  private spawnFor(team: 0 | 1, slot: number): Spawn {
-    const spots = kickoffSpawns(team === 0 ? -1 : 1);
-    return spots[SPAWN_ORDER[slot % SPAWN_ORDER.length]!]!;
-  }
-
-  private spawnPosition(spawn: Spawn): { x: number; y: number; z: number } {
-    return {
-      x: spawn.x,
-      z: spawn.z,
-      y: cfg.car.hitbox.height / 2 + cfg.car.rideHeight,
-    };
   }
 
   /**
@@ -369,7 +386,7 @@ export class Game {
     this.syncConfig();
     this.runHud.showOwned(this.run.upgrades);
 
-    this.match = new Match(spec.rules, {
+    this.sim.startMatch(spec.rules, {
       onGoal: (e) => this.onGoal(e),
       onKickoff: () => this.setUpKickoff(),
       onEnd: (r) => this.onMatchEnd(r),
@@ -383,37 +400,30 @@ export class Game {
   private rebuiltArena = false;
 
   private rebuildArena(): void {
-    destroyArena(this.phys, this.arena);
+    this.sim.rebuildArena();
     this.render.scene.remove(this.arenaMesh);
     disposeArenaMesh(this.arenaMesh);
-    this.arena = createArena(this.phys);
     this.arenaMesh = buildArenaMesh();
     this.render.scene.add(this.arenaMesh);
     this.goalMoment.setArena(this.arenaMesh);
   }
 
-  /** Matches the opposition to the round's lineup: count, tiers and roles. */
+  /**
+   * Matches the opposition to the round's lineup.
+   *
+   * The simulation decides who exists; this adds and removes the visible part
+   * to match. The two lists stay index-aligned because the simulation only ever
+   * appends and pops, and `dressCar` appends in the same order.
+   */
   private setOpponents(lineup: readonly RoundOpponent[]): void {
-    const existing = this.entries.filter((e) => e.bot !== null).length;
-    for (let i = existing; i < lineup.length; i++) {
-      const spot = lineup[i]!;
-      this.addCar(1, i, spot.tier, spot.role);
-    }
-    for (let i = existing; i > lineup.length; i--) {
+    const { added, removed } = this.sim.setOpponents(lineup);
+    for (const sim of added) this.dressCar(sim, false);
+    for (let i = 0; i < removed.length; i++) {
       const entry = this.entries.pop();
       if (!entry) break;
-      this.byCollider.delete(entry.car.collider.handle);
       this.render.scene.remove(entry.mesh);
-      entry.car.destroy();
-    }
-    // Re-stamp tier and role on everyone, since cars are reused across rounds.
-    let i = 0;
-    for (const entry of this.entries) {
-      if (!entry.bot) continue;
-      const spot = lineup[i++];
-      if (!spot) continue;
-      entry.bot.setLevel(spot.tier);
-      entry.bot.setRole(spot.role);
+      this.render.scene.remove(entry.streak.mesh);
+      entry.streak.dispose();
     }
   }
 
@@ -438,13 +448,10 @@ export class Game {
 
   /** Everyone back to their lines, ball on the spot, pads back up. */
   private setUpKickoff(): void {
+    this.sim.resetKickoff();
     for (const entry of this.entries) {
-      entry.car.reset(this.spawnPosition(entry.spawn), entry.spawn.yaw);
       entry.interp.snap(entry.car.position, entry.car.body.rotation());
-      entry.bot?.reset();
     }
-    this.ball.reset();
-    this.pads.resetAll();
     this.ballInterp.snap(this.ball.position, this.ball.body.rotation());
     // Everything has just teleported to its kickoff spot. The ribbons guard
     // against a jump on their own, but clearing here means not even one frame
@@ -491,134 +498,56 @@ export class Game {
     // line; after a goal the ball keeps rolling for show but nobody drives.
     const live = this.screen === 'playing';
     const driving = live && (this.freePlay || (phase === 'playing' && this.run.phase === 'round'));
+    const frozen =
+      !live || (!this.freePlay && (phase === 'countdown' || phase === 'ended' || this.run.phase !== 'round'));
 
-    const world = {
-      ball: {
-        position: this.ball.position,
-        velocity: this.ball.velocity,
-        radius: cfg.ball.radius,
-      },
-      pads: this.pads.pads,
-    };
-
-    for (const entry of this.entries) {
-      if (!driving) {
-        entry.car.input = emptyInput();
-        continue;
-      }
-      if (entry.bot) {
-        entry.car.input = entry.bot.think(dt, world);
-      } else {
-        entry.car.input = this.inputOverride
-          ? { ...emptyInput(), ...this.inputOverride }
-          : this.controls.read();
-      }
-    }
+    // The player's input, read here because the keyboard is not the
+    // simulation's business. A networked build fills this map from the wire
+    // instead, and nothing below changes.
+    const input = this.inputOverride
+      ? { ...emptyInput(), ...this.inputOverride }
+      : this.controls.read();
+    this.playerInput.set(0, input);
     if (!driving && !this.inputOverride) {
       // Keeps the jump latch from banking a press for after the countdown.
       this.controls.read();
     }
 
-    const frozen =
-      !live || (!this.freePlay && (phase === 'countdown' || phase === 'ended' || this.run.phase !== 'round'));
-    if (frozen) {
-      for (const entry of this.entries) this.freeze(entry.car.body);
-      this.freeze(this.ball.body);
-    }
+    const events = this.sim.step(dt, {
+      driving,
+      frozen,
+      clock: live && !this.freePlay,
+      inputs: this.playerInput,
+    });
 
-    const cars: Car[] = [];
-    for (const entry of this.entries) {
-      entry.car.update(dt);
-      cars.push(entry.car);
+    for (const picked of events.padPickups) {
+      if (picked.car === this.player.car) this.run.stats.driving.pads++;
+      this.sound.pad(picked.pad.big);
+      this.particles.burst({ x: picked.pad.x, y: 40, z: picked.pad.z }, picked.pad.big ? 18 : 8, {
+        colour: TRAIL_COLOUR_BLUE,
+        speed: 420,
+        size: 24,
+        life: 0.45,
+      });
     }
-    this.ball.update();
-    if (driving) {
-      this.pads.update(dt, cars);
-      for (const picked of this.pads.justPicked) {
-        if (picked.car === this.player.car) this.run.stats.driving.pads++;
-        this.sound.pad(picked.pad.big);
-        this.particles.burst({ x: picked.pad.x, y: 40, z: picked.pad.z }, picked.pad.big ? 18 : 8, {
-          colour: TRAIL_COLOUR_BLUE,
-          speed: 420,
-          size: 24,
-          life: 0.45,
-        });
-      }
+    for (const touch of events.ballTouches) {
+      const entry = this.entryFor(touch.by.car);
+      if (entry) this.onBallTouched(entry, touch.closing);
     }
-
-    this.phys.step();
-    this.drainContactEvents();
+    for (const hit of events.carHits) {
+      this.onCarsCollided(hit.at, hit.closing, !hit.a.bot || !hit.b.bot);
+    }
 
     if (driving) this.recordDriving(dt);
-
-    if (live && !this.freePlay) {
-      this.match.update(dt, { position: this.ball.position, radius: cfg.ball.radius });
-    }
   }
 
-  /** Car-on-ball touches get the speed-dependent bounce, and set last touch. */
-  private drainContactEvents(): void {
-    const ballHandle = this.ball.collider.handle;
-    this.phys.events.drainCollisionEvents((h1, h2, started) => {
-      if (!started) return;
-      const other = h1 === ballHandle ? h2 : h2 === ballHandle ? h1 : null;
-      if (other === null) {
-        // Car on car. Rapier resolves the bump itself now that the two are in
-        // each other's collision filter; this is only the feedback, which is
-        // what makes a contact register as a hit rather than as the controls
-        // going vague for a moment.
-        const a = this.byCollider.get(h1);
-        const b = this.byCollider.get(h2);
-        if (a && b && a !== b) this.onCarsCollided(a, b);
-        return;
-      }
-      const entry = this.byCollider.get(other);
-      if (!entry) return;
-      this.carBall.apply(entry.car, this.ball);
-      // Needed to tell an own goal from a goal.
-      this.match.touch(entry.car.team);
-      this.onBallTouched(entry);
-    });
-  }
-
-  /**
-   * Sound, sparks and a shove for two cars meeting.
-   *
-   * The extra impulse on top of what the solver does is deliberate. Two boxes
-   * of equal mass meeting at a shallow angle barely deflect, which reads as
-   * scraping past someone rather than hitting them; a kick along the closing
-   * direction, scaled by how hard the contact was, is what makes a challenge
-   * feel like a challenge.
-   */
-  private onCarsCollided(a: CarEntry, b: CarEntry): void {
-    const av = a.car.velocity;
-    const bv = b.car.velocity;
-    const closing = Math.hypot(av.x - bv.x, av.y - bv.y, av.z - bv.z);
-    if (closing < cfg.car.bumpMinSpeed) return;
-
-    const ap = a.car.position;
-    const bp = b.car.position;
-    const dx = bp.x - ap.x;
-    const dy = bp.y - ap.y;
-    const dz = bp.z - ap.z;
-    const len = Math.hypot(dx, dy, dz) || 1;
-    const push = Math.min(cfg.car.bumpMaxImpulse, closing * cfg.car.bumpImpulse);
-    // Apart, along the line between them, and shared: whoever was travelling
-    // faster keeps more of their speed because they had more to begin with.
-    a.car.body.applyImpulse(
-      { x: (-dx / len) * push, y: (-dy / len) * push * 0.3, z: (-dz / len) * push },
-      true,
-    );
-    b.car.body.applyImpulse(
-      { x: (dx / len) * push, y: (dy / len) * push * 0.3, z: (dz / len) * push },
-      true,
-    );
-
-    const at = {
-      x: (ap.x + bp.x) / 2,
-      y: (ap.y + bp.y) / 2,
-      z: (ap.z + bp.z) / 2,
-    };
+  /** Sound, sparks and a camera kick where two cars met. The shove is physics,
+   *  and happens in the simulation. */
+  private onCarsCollided(
+    at: { x: number; y: number; z: number },
+    closing: number,
+    involvesPlayer: boolean,
+  ): void {
     this.sound.hit(closing);
     this.particles.burst(at, closing > 1200 ? 14 : 7, {
       colour: IMPACT_COLOUR,
@@ -626,14 +555,17 @@ export class Game {
       size: 22,
       life: 0.3,
     });
-    if (!a.bot || !b.bot) this.chase.kick(Math.min(16, closing / 180));
+    if (involvesPlayer) this.chase.kick(Math.min(16, closing / 180));
+  }
+
+  /** The visuals belonging to a simulated car. */
+  private entryFor(car: Car): CarEntry | undefined {
+    return this.entries.find((e) => e.car === car);
   }
 
   /** Sound and sparks for a car-on-ball touch, scaled by how hard it was. */
-  private onBallTouched(entry: CarEntry): void {
-    const cv = entry.car.velocity;
+  private onBallTouched(entry: CarEntry, closing: number): void {
     const bv = this.ball.velocity;
-    const closing = Math.hypot(cv.x - bv.x, cv.y - bv.y, cv.z - bv.z);
     this.sound.hit(closing);
     this.particles.burst(this.ball.position, closing > 900 ? 16 : 8, {
       colour: IMPACT_COLOUR,
@@ -653,12 +585,6 @@ export class Game {
     }
   }
 
-  /** Holds a body still, for the countdown and after full time. */
-  private freeze(body: RAPIER.RigidBody): void {
-    const zero = { x: 0, y: 0, z: 0 };
-    body.setLinvel(zero, false);
-    body.setAngvel(zero, false);
-  }
 
   // --- rendering ---------------------------------------------------------
 
@@ -1132,9 +1058,7 @@ export class Game {
 
   /** Re-reads every tunable that is cached rather than read per step. */
   private syncConfig(): void {
-    this.ball.syncConfig();
-    for (const entry of this.entries) entry.car.syncConfig();
-    this.carBall.syncConfig();
+    this.sim.syncConfig();
   }
 
   /**
