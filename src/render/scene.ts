@@ -55,41 +55,27 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   // Far out on purpose. The camera can sit ten thousand units from the far
   // goal, so fog that starts anywhere near the pitch turns the whole far half
   // into haze — which is exactly what the first attempt did.
-  scene.fog = new THREE.Fog(0x0b1120, 22000, 48000);
+  scene.fog = new THREE.Fog(0xb9d2e8, 26000, 54000);
 
   // Near and far have to suit a pitch 10240 long.
   const camera = new THREE.PerspectiveCamera(cfg.camera.fov, 1, 10, 40000);
   camera.position.set(-2000, 400, 0);
 
-  // Night. There is no sun, so the floodlights are the light: four cool keys
-  // angled in from above the corners, which is also why the shadows under a
-  // car point outward from the middle of the pitch rather than all one way.
-  //
-  // Only one of them casts a shadow. Four shadow maps is four extra passes
-  // over the scene for a second and third shadow nobody reads at this camera
-  // distance, and the one that does cast is the brightest.
-  const hemi = new THREE.HemisphereLight(0x3d5578, 0x111726, 0.5);
+  // Daylight. One sun, high and to one side, with the sky filling the shadows.
+  // The floodlight banks stay as furniture but do no lighting work.
+  // Generous sky fill. One sun plus a roof over the seating leaves the stands
+  // in deep shadow, which is physically right and reads as murk — outdoors
+  // the sky itself lights everything the sun does not.
+  const hemi = new THREE.HemisphereLight(0xccdffa, 0x6f8f5e, 1.25);
   scene.add(hemi);
 
-  const corners: [number, number, number][] = [
-    [1, 1, 1.0],
-    [-1, 1, 0.55],
-    [1, -1, 0.6],
-    [-1, -1, 0.45],
-  ];
-  let sun: THREE.DirectionalLight | null = null;
-  for (const [xs, zs, strength] of corners) {
-    const lamp = new THREE.DirectionalLight(0xdce8ff, 2.5 * strength);
-    lamp.position.set(xs * 5200, 5200, zs * 4400);
-    scene.add(lamp);
-    if (!sun) sun = lamp;
-  }
+  const fill = new THREE.DirectionalLight(0xbcd4f0, 0.35);
+  fill.position.set(-4000, 2600, -2600);
+  scene.add(fill);
 
-  // A bounce off the pitch, so the undersides of cars are not black. Tinted to
-  // the floor it is bouncing off, which is now cool rather than grass green.
-  const bounce = new THREE.DirectionalLight(0x6d82a8, 0.22);
-  bounce.position.set(0, -1000, 0);
-  scene.add(bounce);
+  let sun: THREE.DirectionalLight | null = new THREE.DirectionalLight(0xfff6e8, 2.4);
+  sun.position.set(3200, 6000, 2400);
+  scene.add(sun);
 
   sun = sun!;
   sun.castShadow = true;
@@ -180,9 +166,9 @@ export function buildArenaMesh(): THREE.Group {
   // surface laid just above it, so the pitch can be repainted when a modifier
   // changes the goals without touching the collider geometry's mesh.
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x1b2742,
-    roughness: 0.9,
-    metalness: 0.05,
+    color: 0x2f6b36,
+    roughness: 0.95,
+    metalness: 0.0,
   });
   // The arena wall comes in two bands, and this is the change that stops the
   // environment feeling empty. The playfield is a sealed box 2044 tall whose
@@ -217,7 +203,7 @@ export function buildArenaMesh(): THREE.Group {
     depthWrite: false,
   });
   const rampMat = new THREE.MeshStandardMaterial({
-    color: 0x55637a,
+    color: 0xbcc7d4,
     roughness: 0.38,
     metalness: 0.12,
     side: THREE.DoubleSide,
@@ -225,9 +211,9 @@ export function buildArenaMesh(): THREE.Group {
   // The ceiling is a playable surface but sits between the camera and the pitch,
   // so it is drawn as a faint shell rather than a solid lid.
   const ceilingMat = new THREE.MeshStandardMaterial({
-    color: 0x5d6b82,
+    color: 0xc5d2e0,
     transparent: true,
-    opacity: 0.05,
+    opacity: 0.04,
     side: THREE.DoubleSide,
     depthWrite: false,
   });

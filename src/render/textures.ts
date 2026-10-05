@@ -37,25 +37,29 @@ function finish(el: HTMLCanvasElement, repeat = false): THREE.Texture {
 export function skyTexture(): THREE.Texture {
   const [el, ctx] = canvas(64, 256);
   const g = ctx.createLinearGradient(0, 0, 0, 256);
-  // Night. Dark overhead, with a lift towards the horizon where the
-  // floodlights catch the air above the bowl — a flat black sky reads as a
-  // missing background rather than as night.
-  g.addColorStop(0.0, '#04070e');
-  g.addColorStop(0.34, '#0a1324');
-  g.addColorStop(0.47, '#1b2b45');
-  g.addColorStop(0.5, '#243550');
-  g.addColorStop(0.54, '#12192a');
-  g.addColorStop(1.0, '#070a12');
+  // Daylight, open to the sky. Deep overhead, paling towards the horizon, with
+  // the ground half kept dim so the environment map does not wash the pitch.
+  g.addColorStop(0.0, '#2f6fc4');
+  g.addColorStop(0.3, '#6ba4e2');
+  g.addColorStop(0.46, '#b9d9f4');
+  g.addColorStop(0.5, '#d8e8f6');
+  g.addColorStop(0.54, '#8ea4b6');
+  g.addColorStop(1.0, '#44525e');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 256);
 
-  // A scatter of stars in the upper half. Faint on purpose: they should be
-  // something you notice on a replay, not a planetarium.
-  ctx.fillStyle = 'rgba(226,236,255,0.5)';
-  for (let i = 0; i < 90; i++) {
+  // A scatter of cloud, soft enough to read as sky rather than as texture.
+  for (let i = 0; i < 26; i++) {
     const x = (i * 29.7) % 64;
-    const y = (i * 17.3) % 110;
-    ctx.fillRect(x, y, 1, 1);
+    const y = 12 + ((i * 17.3) % 92);
+    const r = 4 + ((i * 7) % 9);
+    const cloud = ctx.createRadialGradient(x, y, 0, x, y, r);
+    cloud.addColorStop(0, 'rgba(255,255,255,0.5)');
+    cloud.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = cloud;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   const tex = finish(el);
@@ -63,7 +67,7 @@ export function skyTexture(): THREE.Texture {
   return tex;
 }
 
-/** The pitch: banded surface, markings, and a tinted area at each end. */
+/** The pitch: mown grass, markings, and a tinted area at each end. */
 export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Texture {
   const W = 2560;
   const H = 2048;
@@ -78,13 +82,11 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   const pz = (z: number) => (z + hw) * sz;
   const len = (uu: number) => uu * sx;
 
-  // Banding across the short axis. Not mowing stripes: this is a cool synthetic
-  // surface rather than grass, so the bands read as panels laid across the
-  // pitch. They stay either way, because alternating bands passing under the
-  // car are a large part of how fast the game feels.
+  // Mowing stripes, the way a roller leaves them. Alternating bands passing
+  // under the car are also a large part of how fast the game feels.
   const stripes = 16;
   for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? '#2b3b5c' : '#253454';
+    ctx.fillStyle = i % 2 ? '#3f7d43' : '#36713b';
     ctx.fillRect((i / stripes) * W, 0, W / stripes + 1, H);
   }
 
@@ -92,9 +94,9 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // Stronger falloff than daylight wants: under floodlights the middle of the
   // pitch is the brightest thing in the arena and the corners fall away.
   const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.66);
-  vg.addColorStop(0, 'rgba(214,236,255,0.10)');
-  vg.addColorStop(0.55, 'rgba(0,0,0,0.12)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.46)');
+  vg.addColorStop(0, 'rgba(255,255,255,0.06)');
+  vg.addColorStop(0.55, 'rgba(0,0,0,0.06)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.26)');
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, W, H);
 
@@ -102,11 +104,10 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
   // the cue that tells you which way you are attacking at a glance.
   const mouth = goalWidth / 2;
   for (const [sign, tint] of [
-    [1, 'rgba(255,112,67,0.26)'],
-    // Cyan rather than the team's own blue. On a cool floor a blue tint over
-    // blue is almost no tint at all, and the end you are attacking has to be
-    // readable at a glance: the orange end got that for free, this one did not.
-    [-1, 'rgba(120,226,255,0.46)'],
+    // Back to the teams' own colours: on grass both read clearly, which they
+    // did not on a blue floor — a blue tint over blue is almost no tint.
+    [1, 'rgba(255,112,67,0.30)'],
+    [-1, 'rgba(66,145,245,0.30)'],
   ] as [number, string][]) {
     const depth = len(1700);
     ctx.fillStyle = tint;
@@ -115,37 +116,8 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
     ctx.fill();
   }
 
-  // Reflections of the light banks overhead, painted on.
-  //
-  // A real reflection means drawing the scene a second time into a render
-  // target, which is a lot of frame for something the camera only ever sees at
-  // a glancing angle. Painted streaks under each bank read the same at this
-  // angle and cost nothing — and a floor with the lights in it is most of what
-  // makes an indoor arena look indoor.
-  const banks = 7;
-  for (const zs of [1, -1]) {
-    for (let i = 0; i < banks; i++) {
-      const bx = px(((i - (banks - 1) / 2) / ((banks - 1) / 2)) * hl * 0.76);
-      const bz = pz(zs * hw * 0.74);
-      const pool = ctx.createRadialGradient(bx, bz, 0, bx, bz, len(1500));
-      pool.addColorStop(0, 'rgba(196,222,255,0.20)');
-      pool.addColorStop(0.45, 'rgba(176,205,245,0.07)');
-      pool.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.save();
-      // Stretched towards the middle of the pitch, the way a reflection of a
-      // long bank of lights elongates away from you.
-      ctx.translate(bx, bz);
-      ctx.scale(1, 2.1);
-      ctx.translate(-bx, -bz);
-      ctx.fillStyle = pool;
-      ctx.fillRect(bx - len(1600), bz - len(1600), len(3200), len(3200));
-      ctx.restore();
-    }
-  }
-
-  // Markings stay bright: they are painted lines catching floodlight, and they
-  // are also how you read your position at speed.
-  ctx.strokeStyle = 'rgba(238,246,255,0.80)';
+  // Markings: painted white on grass, and how you read your position at speed.
+  ctx.strokeStyle = 'rgba(250,252,255,0.88)';
   ctx.lineCap = 'round';
 
   // Halfway line and centre circles.
@@ -159,7 +131,7 @@ export function pitchTexture(layout: ArenaLayout, goalWidth: number): THREE.Text
     ctx.arc(px(0), pz(0), len(r), 0, Math.PI * 2);
     ctx.stroke();
   }
-  ctx.fillStyle = 'rgba(238,246,255,0.80)';
+  ctx.fillStyle = 'rgba(250,252,255,0.88)';
   ctx.beginPath();
   ctx.arc(px(0), pz(0), len(50), 0, Math.PI * 2);
   ctx.fill();
@@ -274,14 +246,14 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   const H = 256;
   const [el, ctx] = canvas(W, H);
 
-  ctx.fillStyle = '#3c4555';
+  ctx.fillStyle = '#d5dde7';
   ctx.fillRect(0, 0, W, H);
 
   // Upper face, very slightly cooler than the lower, so the two bands read as
   // separate surfaces rather than one.
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, 'rgba(150,175,205,0.22)');
-  g.addColorStop(1, 'rgba(8,12,20,0.35)');
+  g.addColorStop(0, 'rgba(255,255,255,0.45)');
+  g.addColorStop(1, 'rgba(120,140,165,0.22)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
@@ -294,9 +266,9 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   // opposite of what detail on a wall is for.
   // The hoardings are the lit band on an otherwise dark wall, which is what
   // gives a sense of speed as it goes past.
-  const accent = team === 'orange' ? '#b4532a' : team === 'blue' ? '#2f6796' : '#6c7a8d';
+  const accent = team === 'orange' ? '#c2622f' : team === 'blue' ? '#35719f' : '#8d99a8';
   for (let i = 0; i < panels; i++) {
-    ctx.fillStyle = i % 2 ? accent : '#9aa8bb';
+    ctx.fillStyle = i % 2 ? accent : '#eef3f9';
     ctx.fillRect((i / panels) * W, boardTop, W / panels + 1, boardH);
   }
   ctx.fillStyle = 'rgba(12,18,28,0.6)';
@@ -304,7 +276,7 @@ export function wallTexture(team?: 'orange' | 'blue'): THREE.Texture {
   ctx.fillRect(0, boardTop + boardH, W, H * 0.015);
 
   // Kickplate: scuffed dark band at floor level, where a car actually hits.
-  ctx.fillStyle = '#242c38';
+  ctx.fillStyle = '#5a6373';
   ctx.fillRect(0, H * 0.86, W, H * 0.14);
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
   for (let i = 0; i < 120; i++) {
@@ -327,12 +299,12 @@ export function fasciaTexture(): THREE.Texture {
   const H = 128;
   const [el, ctx] = canvas(W, H);
 
-  ctx.fillStyle = '#131926';
+  ctx.fillStyle = '#7e8a99';
   ctx.fillRect(0, 0, W, H);
 
   // Lit panels, alternating house colours with dark gaps between.
   const panels = 12;
-  const colours = ['#2f6796', '#1a2130', '#b4532a', '#1a2130'];
+  const colours = ['#35719f', '#dfe6ee', '#c2622f', '#dfe6ee'];
   for (let i = 0; i < panels; i++) {
     const x = (i / panels) * W;
     const w = W / panels;

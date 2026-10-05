@@ -853,25 +853,20 @@ describe('walls and the ceiling', () => {
     expect(car.position.z).toBeGreaterThan(3900);
   });
 
-  it('falls off the ceiling when it runs out of speed', () => {
-    // The ceiling is not flypaper. Cancelling the part of gravity that peels
-    // the car off outright let it sit up there at a standstill, which reads as
-    // being stuck rather than as driving.
-    // Measured in whole seconds of hanging, and the fall itself takes a
-    // moment: the car has to drop 200 units before this stops counting, which
-    // at the peel rate is most of a second on its own.
-    const stopped = hangFromCeiling(0);
-    const crawling = hangFromCeiling(300);
-    const quick = hangFromCeiling(1200);
-    expect(stopped).toBeLessThan(1.2);
-    expect(crawling).toBeLessThan(1.5);
-    // The ordering is the real claim: speed is what keeps you up there.
-    expect(quick).toBeGreaterThan(crawling * 2);
+  it('sheds the car off an overhead surface under its own weight', () => {
+    // The ceiling is somewhere you pass across, not somewhere you hang. An
+    // earlier version cancelled the part of gravity that peels a car off an
+    // overhead surface outright, and the result was flypaper: the car clung
+    // there and then dropped, where it should arc off and fly. Rocket League
+    // cancels none of it.
+    expect(Number(hangFromCeiling(0))).toBeLessThan(1.2);
+    expect(Number(hangFromCeiling(1200))).toBeLessThan(1.5);
   });
 
-  it('hangs on while it is moving', () => {
-    // And it has to be worth doing, or nobody would go up there.
-    expect(hangFromCeiling(1200)).toBeGreaterThan(2.5);
+  it('still lets a fast car cross it rather than bouncing straight off', () => {
+    // It has to be worth going up there at all: a car arriving with speed
+    // gets a moment on the ceiling before gravity takes it.
+    expect(Number(hangFromCeiling(2000))).toBeGreaterThan(0.4);
   });
 
   it('holds a steady ride height on the floor still', () => {

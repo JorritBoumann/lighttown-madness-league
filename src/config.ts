@@ -96,12 +96,15 @@ export const config = {
      * How much of the peeling part of gravity is cancelled on an overhead
      * surface, so `stickForce` can actually hold the car on the ceiling.
      *
-     * 1 cancels it exactly, which leaves the ordinary stick force doing the
-     * holding and makes ceiling driving a matter of having the speed to get
-     * there rather than a matter of arithmetic the car cannot win. Below 1 the
-     * ceiling sheds you; above 1 it sucks you up, which reads as a magnet.
+     * 1 cancels it exactly and the ceiling becomes flypaper — the car hangs
+     * there and then drops, where it should arc off and fly. Rocket League
+     * cancels none of it: stick force alone holds the car, gravity always
+     * wins overhead, and that is why a car leaves a ceiling instead of
+     * clinging to it. 0 is the faithful value and breaks climbing a wall,
+     * which needs a little help at the top; 0.3 keeps the climb and still
+     * sheds the car off an overhead surface under its own weight.
      */
-    ceilingStick: 1,
+    ceilingStick: 0.3,
     /**
      * How fast the car has to be moving to hang from an overhead surface.
      *
@@ -550,7 +553,7 @@ export const config = {
     /** Height of the roof above the top row. */
     roofClearance: 900,
     /** Light shafts from the roof banks down onto the pitch. */
-    shaftOpacity: 0.012,
+    shaftOpacity: 0.0,
     /** The hanging scoreboards at each end. */
     screenWidth: 1500,
     tunnelHeight: 560,
@@ -657,7 +660,7 @@ export const config = {
 
   render: {
     /** Tone-mapping exposure. Higher is brighter before the filmic rolloff. */
-    exposure: 1.02,
+    exposure: 0.88,
     /** How much the sky gradient lights the scene through reflections. */
     /**
      * How much the reflection map lights the scene.
@@ -668,9 +671,9 @@ export const config = {
      * — the floor went from navy to pale blue without anything in the lighting
      * having been touched.
      */
-    environmentIntensity: 0.07,
+    environmentIntensity: 0.45,
     /** The same correction for the pitch, which reflects more than most. */
-    pitchEnvIntensity: 0.06,
+    pitchEnvIntensity: 0.15,
     /** Face size for the arena's self-captured reflection map. 256 is plenty:
      *  it is blurred into a radiance map immediately afterwards. */
     envCaptureSize: 256,
@@ -699,9 +702,9 @@ export const config = {
     scaleOutlierMs: 90,
 
     /** Bloom: threshold is the brightness a pixel needs before it blooms. */
-    bloomStrength: 0.62,
+    bloomStrength: 0.2,
     bloomRadius: 0.62,
-    bloomThreshold: 0.72,
+    bloomThreshold: 0.85,
   },
 
   camera: {

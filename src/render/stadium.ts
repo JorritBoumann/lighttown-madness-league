@@ -111,7 +111,7 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   const edges = footprintEdges(layout);
 
   const concrete = new THREE.MeshStandardMaterial({ color: 0x2b3241, roughness: 0.94 });
-  const structure = new THREE.MeshStandardMaterial({ color: 0x1b2028, roughness: 0.8, metalness: 0.3 });
+  const structure = new THREE.MeshStandardMaterial({ color: 0x6f7a89, roughness: 0.8, metalness: 0.3 });
 
   // --- seating bowl ------------------------------------------------------
   // Two decks with a fascia between them. One deck reads as a terrace; the
@@ -204,15 +204,10 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   );
   const people = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
-    // A little self-lit. The four keys are aimed at the pitch, so lighting the
-    // crowd off them alone leaves it almost black at gameplay distance — and
-    // a crowd you cannot see is the same as no crowd. This stands in for the
-    // house lights over the seating.
-    new THREE.MeshStandardMaterial({
-      roughness: 0.88,
-      emissive: 0x161d2b,
-      emissiveIntensity: 1,
-    }),
+    // No self-lighting needed in daylight: the sky fills the seating. It was
+    // there for the night version, where four keys aimed at the pitch left the
+    // crowd almost black at gameplay distance.
+    new THREE.MeshStandardMaterial({ roughness: 0.88 }),
     crowd.length,
   );
   const colour = new THREE.Color();
@@ -220,7 +215,7 @@ export function buildStadium(layout: ArenaLayout): Stadium {
     people.setMatrixAt(i, crowd[i]!.m);
     colour.copy(palette[i % palette.length]!);
     // Rows further back sit in deeper shadow.
-    colour.multiplyScalar(0.85 + crowd[i]!.shade * 0.55);
+    colour.multiplyScalar(0.72 + crowd[i]!.shade * 0.5);
     people.setColorAt(i, colour);
   }
   people.instanceMatrix.needsUpdate = true;
@@ -256,8 +251,8 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   // --- fascia and banners ------------------------------------------------
   const fasciaMat = new THREE.MeshStandardMaterial({
     map: fasciaTexture(),
-    emissive: 0x24304a,
-    emissiveIntensity: 0.5,
+    emissive: 0x2c3a52,
+    emissiveIntensity: 0.18,
     roughness: 0.5,
     side: THREE.DoubleSide,
   });
@@ -278,30 +273,42 @@ export function buildStadium(layout: ArenaLayout): Stadium {
   group.add(new THREE.Mesh(mergeGeometries(fasciaParts, false), fasciaMat));
   for (const geo of fasciaParts) geo.dispose();
 
-  // --- roof --------------------------------------------------------------
-  // Enclosing the volume is the single biggest thing: open to the sky, the
-  // whole arena reads as a lot with seating round it rather than a building.
+  // --- roof ring ----------------------------------------------------------
+  // Open over the pitch, covered over the seating: the shape of an open-air
+  // stadium. A lid across the whole arena encloses it like an indoor hall,
+  // which is the wrong feeling for a game played under the sky — and it hides
+  // the thing a car flying out of the bowl is flying up into.
   const roofY = upper.base + upper.rows * upper.rise + s.roofClearance;
   const roofSpanX = layout.halfLength + upper.inset + upper.rows * upper.tread + 900;
   const roofSpanZ = layout.halfWidth + upper.inset + upper.rows * upper.tread + 900;
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(roofSpanX * 2, 120, roofSpanZ * 2),
-    new THREE.MeshStandardMaterial({ color: 0x141922, roughness: 0.95 }),
-  );
-  roof.position.y = roofY;
-  group.add(roof);
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x9aa7b6, roughness: 0.9 });
 
-  // Trusses, so the underside of the roof is structure rather than a lid.
+  const roofParts: THREE.BufferGeometry[] = [];
+  // Four spans round the bowl, leaving the middle open to the sky.
+  const innerX = layout.halfLength + upper.inset * 0.6;
+  const innerZ = layout.halfWidth + upper.inset * 0.6;
+  for (const [sx, sz, px, pz] of [
+    [roofSpanX * 2, roofSpanZ - innerZ, 0, (roofSpanZ + innerZ) / 2],
+    [roofSpanX * 2, roofSpanZ - innerZ, 0, -(roofSpanZ + innerZ) / 2],
+    [roofSpanX - innerX, innerZ * 2, (roofSpanX + innerX) / 2, 0],
+    [roofSpanX - innerX, innerZ * 2, -(roofSpanX + innerX) / 2, 0],
+  ] as [number, number, number, number][]) {
+    const slab = new THREE.BoxGeometry(sx, 110, sz);
+    slab.translate(px, roofY, pz);
+    roofParts.push(slab);
+  }
+  const roof = new THREE.Mesh(mergeGeometries(roofParts, false), roofMat);
+  group.add(roof);
+  for (const geo of roofParts) geo.dispose();
+
+  // Trusses under the covered part only.
   const trusses: THREE.BufferGeometry[] = [];
   for (let i = -6; i <= 6; i++) {
-    const beam = new THREE.BoxGeometry(220, 150, roofSpanZ * 2);
-    beam.translate((i / 6) * roofSpanX * 0.86, roofY - 150, 0);
-    trusses.push(beam);
-  }
-  for (let i = -4; i <= 4; i++) {
-    const beam = new THREE.BoxGeometry(roofSpanX * 2, 110, 180);
-    beam.translate(0, roofY - 300, (i / 4) * roofSpanZ * 0.86);
-    trusses.push(beam);
+    for (const zs of [1, -1]) {
+      const beam = new THREE.BoxGeometry(200, 130, roofSpanZ - innerZ);
+      beam.translate((i / 6) * roofSpanX * 0.9, roofY - 130, zs * ((roofSpanZ + innerZ) / 2));
+      trusses.push(beam);
+    }
   }
   const truss = new THREE.Mesh(mergeGeometries(trusses, false), structure);
   group.add(truss);
