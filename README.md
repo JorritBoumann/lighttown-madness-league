@@ -537,6 +537,35 @@ at 120fps a ball at full speed moves 21 units a frame, which never cleared the
 comes out longer on a slow machine than a fast one. On a fixed interval the
 tail is the same length in seconds everywhere, which is what the tests check.
 
+## Sound for the goal and the replay
+
+Synthesised like everything else: no files, and every sound built from the same
+three tools — an oscillator with a glide, a low thump, and a burst of filtered
+noise.
+
+- **The impact comes before the fanfare.** A goal that opens with a tune has no
+  weight. The ball hitting the net is a bang; the tune is what the arena does
+  about it a moment later, 120ms behind.
+- **The crowd is noise through a bandpass**, swelling faster than it dies and
+  opening the filter as it goes — what the ear reads as thousands of people is a
+  broad unpitched wash, and a tone of any kind sounds like a machine. Conceding
+  gets a thinner, shorter one: the stadium is not on your side.
+- **The slow motion gets a falling sweep going in and a rising one coming out.**
+  Without it the hitstop is silent, and a picture that stops dead while the
+  sound carries on reads as a dropped frame rather than as an effect. Fired on
+  the crossings rather than per frame — per frame it stacks a new oscillator
+  every frame for a second, and the result is a siren.
+- **The replay gets a whoosh in and out**, and the boost loop is silenced while
+  it plays: that loop is a live sound and the world is not live, so leaving it
+  running holds a thrust note under a replay of something that finished seconds
+  ago.
+
+Tested on what can be tested without ears: that every sound is a no-op before a
+gesture has unlocked the audio context, in an environment with no Web Audio at
+all, and when muted. Browsers refuse to start an AudioContext without a gesture,
+so those guards are the difference between a quiet game and one that throws on
+the first goal of a run.
+
 ## The goal moment
 
 Scoring used to be a number changing: a camera kick, one burst of particles, and

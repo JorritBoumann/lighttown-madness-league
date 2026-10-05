@@ -96,6 +96,8 @@ export class Game {
   /** Goal replays, and the countdown to one starting. */
   private readonly replay = new Replay();
   private replayPending = -1;
+  /** Last frame's time scale, so the slow-motion sweep fires on the edge. */
+  private lastTimeScale = 1;
   /** Last frame's boost, so spending can be measured from the tank. */
   private lastBoost = cfg.boost.start;
   /** The ring thrown off when a car crosses into supersonic. */
@@ -665,6 +667,14 @@ export class Game {
     this.updateTrails(dt);
     this.goalMoment.update(dt);
 
+    // The slow motion gets a falling sweep going in and a rising one coming
+    // back. Fired on the crossings rather than per frame, or it stacks a new
+    // oscillator every frame for a second and the result is a siren.
+    const scale = this.goalMoment.timeScale;
+    if (scale < 1 && this.lastTimeScale >= 1) this.sound.timeDilation(true);
+    else if (scale >= 1 && this.lastTimeScale < 1) this.sound.timeDilation(false);
+    this.lastTimeScale = scale;
+
     this.stadium.update(dt, {
       blue: this.match.score[0],
       orange: this.match.score[1],
@@ -920,6 +930,11 @@ export class Game {
         // Framed on where the ball ended up, which is in the net.
         if (!this.replay.start(this.ball.position)) return false;
         this.replayHud.show();
+        this.sound.replaySting(true);
+        // The boost loop is a live sound and the world is not live. Left
+        // running it holds a thrust note under a replay of something that
+        // finished seconds ago.
+        this.sound.setBoost(0);
       }
     }
 
@@ -929,6 +944,7 @@ export class Game {
     if (this.controls.pressed('menuSelect') || this.controls.pressed('pause')) {
       this.replay.stop();
       this.replayHud.hide();
+      this.sound.replaySting(false);
       this.restoreFromReplay();
       return false;
     }
@@ -940,6 +956,7 @@ export class Game {
 
     if (!this.replay.update(dt)) {
       this.replayHud.hide();
+      this.sound.replaySting(false);
       this.restoreFromReplay();
       return false;
     }

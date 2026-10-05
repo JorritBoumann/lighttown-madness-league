@@ -71,9 +71,83 @@ export class Sound {
 
   goal(forPlayer: boolean): void {
     if (!this.ctx || this.muted) return;
+
+    // The impact first, then the fanfare over it. A goal that opens with a
+    // tune has no weight: the ball hitting the net is a bang, and the tune is
+    // what the arena does about it a moment later.
+    this.thump(52, 0.42, cfg.audio.goalImpact);
+    this.crack(0.26, 2200, cfg.audio.goalImpact * 0.6);
+
     // Rising for one scored, falling for one conceded.
     const notes = forPlayer ? [440, 554, 659, 880] : [440, 370, 294];
-    for (const [i, freq] of notes.entries()) this.tone(freq, 0.18, 0.3, i * 0.075, 'triangle');
+    for (const [i, freq] of notes.entries()) {
+      this.tone(freq, 0.18, 0.3, 0.12 + i * 0.075, 'triangle');
+    }
+
+    // Conceding gets a thinner, shorter crowd: the stadium is not on your side.
+    this.crowd(forPlayer ? 1 : 0.45);
+  }
+
+  /**
+   * The crowd, as a swell of filtered noise.
+   *
+   * Noise through a bandpass is a surprisingly good crowd — what the ear reads
+   * as thousands of people is a broad, unpitched wash that rises faster than it
+   * falls. A tone of any kind sounds like a machine.
+   */
+  crowd(intensity = 1): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.noise || this.muted || intensity <= 0) return;
+    const a = cfg.audio;
+    const start = ctx.currentTime;
+    const total = a.crowdRise + a.crowdFall;
+
+    const source = ctx.createBufferSource();
+    source.buffer = this.noise;
+    source.loop = true;
+
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.setValueAtTime(420, start);
+    // Opens up as it swells and closes as it dies, which is the difference
+    // between a roar and a hiss.
+    band.frequency.linearRampToValueAtTime(1150, start + a.crowdRise);
+    band.frequency.exponentialRampToValueAtTime(380, start + total);
+    band.Q.value = 0.6;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.linearRampToValueAtTime(a.crowd * intensity, start + a.crowdRise);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + total);
+
+    source.connect(band).connect(gain).connect(this.master);
+    source.start(start);
+    source.stop(start + total + 0.05);
+  }
+
+  /**
+   * Time slowing for the celebration, and coming back.
+   *
+   * A falling sweep on the way in and a rising one on the way out. Without it
+   * the hitstop is silent, and a picture that stops dead while the sound
+   * carries on reads as a dropped frame rather than as an effect.
+   */
+  timeDilation(slowing: boolean): void {
+    if (!this.ctx || this.muted) return;
+    const g = cfg.audio.timeSweep;
+    if (slowing) {
+      this.tone(520, 0.5, g, 0, 'sawtooth', 90);
+    } else {
+      this.tone(120, 0.35, g * 0.7, 0, 'sawtooth', 640);
+    }
+  }
+
+  /** Going into a replay, and coming out of it. */
+  replaySting(entering: boolean): void {
+    if (!this.ctx || this.muted) return;
+    const g = cfg.audio.replaySting;
+    this.crack(0.3, entering ? 2600 : 1500, g);
+    this.tone(entering ? 300 : 700, 0.28, g, 0, 'sine', entering ? 760 : 280);
   }
 
   jump(): void {

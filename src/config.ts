@@ -485,6 +485,17 @@ export const config = {
     master: 0.5,
     /** Boost thrust loop, relative to master. */
     boost: 0.18,
+    /** The crowd's roar when a goal goes in: how loud, and how long it takes
+     *  to swell and to die away. */
+    crowd: 0.26,
+    crowdRise: 0.35,
+    crowdFall: 2.4,
+    /** The impact under the fanfare. */
+    goalImpact: 0.5,
+    /** The pitch sweep as time slows for the celebration and comes back. */
+    timeSweep: 0.16,
+    /** The whoosh in and out of a replay. */
+    replaySting: 0.17,
   },
 
   /**
