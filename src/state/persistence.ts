@@ -7,7 +7,15 @@
  * bad record is treated as no record rather than crashing the menu.
  */
 
-const KEY = 'rocket-gauntlet:best-run:v1';
+const KEY = 'lighttown-madness:best-run:v1';
+/**
+ * What the game used to save under, before it was renamed.
+ *
+ * Read once as a fallback and copied forward, so a rename does not quietly
+ * throw away somebody's best run — which is the only thing in here that cannot
+ * be regenerated.
+ */
+const LEGACY_KEY = 'rocket-gauntlet:best-run:v1';
 
 export interface BestRun {
   /** Highest round number cleared. */
@@ -39,9 +47,18 @@ function isBestRun(value: unknown): value is BestRun {
 export function loadBestRun(): BestRun | null {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isBestRun(parsed) ? parsed : null;
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      return isBestRun(parsed) ? parsed : null;
+    }
+    // Nothing under the current key: look for a record left by the old name and
+    // carry it forward, once.
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (!legacy) return null;
+    const parsed: unknown = JSON.parse(legacy);
+    if (!isBestRun(parsed)) return null;
+    localStorage.setItem(KEY, legacy);
+    return parsed;
   } catch {
     return null;
   }

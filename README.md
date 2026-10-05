@@ -1,4 +1,4 @@
-# Rocket Gauntlet
+# Lighttown Madness Leaugue
 
 Browser-based, Rocket League-style arcade football, built around a gauntlet run:
 a sequence of escalating rounds you have to clear back to back.
