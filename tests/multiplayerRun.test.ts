@@ -275,3 +275,44 @@ describe('the server does not get stuck', () => {
     expect(s.runState().phase).toBe('between');
   });
 });
+
+describe('who is on which team', () => {
+  it('says so in every snapshot: people first, bots after', () => {
+    // A client used to guess "mine blue, everyone else orange", which painted a
+    // co-op teammate as an opponent.
+    const s = server();
+    const a = s.join()!;
+    s.join();
+    expect(s.snapshotFor(a.handle.id).teams).toEqual([0, 0, 1]);
+  });
+
+  it('describes exactly as many cars as it has', () => {
+    const s = server();
+    const a = s.join()!;
+    const snap = s.snapshotFor(a.handle.id);
+    expect(snap.teams.length).toBe(snap.cars.length);
+  });
+});
+
+describe('removing a car', () => {
+  it('takes the last one and nothing else', () => {
+    // Index alignment is the whole contract: snapshots name cars by index, so a
+    // removal from the middle would quietly relabel every car after it.
+    const s = server();
+    const before = s.sim.cars.map((c) => c.car);
+    const removed = s.sim.removeLastCar();
+    expect(removed!.car).toBe(before[before.length - 1]);
+    expect(s.sim.cars.map((c) => c.car)).toEqual(before.slice(0, -1));
+  });
+
+  it('leaves the removed car out of the next snapshot', () => {
+    const s = server();
+    const a = s.join()!;
+    const count = s.snapshotFor(a.handle.id).cars.length;
+    s.sim.removeLastCar();
+    s.step();
+    const snap = s.snapshotFor(a.handle.id);
+    expect(snap.cars.length).toBe(count - 1);
+    expect(snap.teams.length).toBe(count - 1);
+  });
+});

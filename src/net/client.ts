@@ -62,6 +62,11 @@ export class NetClient {
     return this.lastCarCount;
   }
 
+  /** Each car's team as the server last described them, by index. */
+  get snapshotTeams(): readonly (0 | 1)[] {
+    return this.lastTeams;
+  }
+
   /** Which car in the snapshot is ours. Null until the server says. */
   carIndex: number | null = null;
   readonly stats: ClientStats = { snapshots: 0, lastReplay: 0, lastError: 0, pending: 0 };
@@ -71,6 +76,7 @@ export class NetClient {
   private readonly unacked: PendingInput[] = [];
   private latest: SnapshotMessage | null = null;
   private lastCarCount = 0;
+  private lastTeams: (0 | 1)[] = [];
   private lastClock = 0;
   private lastScore: [number, number] = [0, 0];
   private lastPhase = 'countdown';
@@ -172,6 +178,7 @@ export class NetClient {
     }
     this.latest = message;
     this.lastCarCount = message.cars.length;
+    this.lastTeams = message.teams;
     this.lastClock = message.clock;
     this.lastScore = message.score;
     this.lastPhase = message.phase;

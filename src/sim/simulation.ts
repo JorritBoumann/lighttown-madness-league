@@ -122,6 +122,21 @@ export class Simulation {
   }
 
   /**
+   * Removes the most recently added car.
+   *
+   * Only ever the last one, which keeps the car list index-aligned with any
+   * mirror of it -- a client builds its cars in the server's order, and indices
+   * are how snapshots say which car is which.
+   */
+  removeLastCar(): SimCar | null {
+    const entry = this.cars.pop();
+    if (!entry) return null;
+    this.byCollider.delete(entry.car.collider.handle);
+    entry.car.destroy();
+    return entry;
+  }
+
+  /**
    * Matches the opposition to a round's lineup.
    *
    * Returns the cars that were removed, because the caller is holding meshes

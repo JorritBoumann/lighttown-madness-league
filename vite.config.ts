@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
 
@@ -47,6 +48,19 @@ export default defineConfig(({ isSsrBuild }) => ({
     },
   },
   server: { port: 5173, host: '127.0.0.1' },
+  test: {
+    /**
+     * Twenty seconds rather than vitest's five.
+     *
+     * This suite plays football: several tests run tens of thousands of
+     * physics steps across seeded scenarios, and on a busy machine those sit
+     * right at five seconds. Under load they failed one after another -- one,
+     * then two, then three runs in a row -- and every failure was a timeout,
+     * never a wrong answer. Five seconds is a default for unit tests; twenty
+     * still catches a test that has genuinely hung.
+     */
+    testTimeout: 20_000,
+  },
   build: {
     target: 'es2022',
 

@@ -156,10 +156,17 @@ export class Game {
    * which is the point of having moved the simulation out in the first place.
    */
   private net: NetClient | null = null;
+  /** Whether the car list has been rebuilt from the server's yet. */
+  private remoteCarsBuilt = false;
   /** The round's tuning when a server is dictating it. */
   private readonly remoteConfig = new ConfigOverrides();
   /** Index 0 is always the player. */
   private get player(): CarEntry {
+    // Online, ours is whichever seat the server gave us. It used to be car 0
+    // regardless, so the second person into a room had the first person's
+    // camera and the first person's boost and speed on their HUD.
+    const seat = this.net?.carIndex;
+    if (seat != null && this.entries[seat]) return this.entries[seat];
     return this.entries[0]!;
   }
   /** Collider handle to entry, for attributing ball contacts. */
@@ -477,12 +484,52 @@ export class Game {
    * rather than assumes. Teams are taken from the seat count the server was
    * started with, which is the one thing a client still has to be told.
    */
-  private matchRemoteCars(count: number): void {
-    while (this.entries.length < count) {
-      const index = this.entries.length;
-      const mine = index === this.net?.carIndex;
-      this.dressCar(this.sim.addCar(mine ? 0 : 1, index, null), mine);
+  private matchRemoteCars(teams: readonly (0 | 1)[]): void {
+    if (teams.length === 0) return;
+
+    // The first time, throw away every car the solo setup made. They include
+    // a bot with its own brain, which went on driving one of the server's cars
+    // between snapshots -- usually the other human's -- so it was dragged back
+    // into place thirty times a second.
+    let keep = this.remoteCarsBuilt ? this.entries.length : 0;
+    // After that, keep each car only while it is still the team the server
+    // says it is. Teams do not change per index in practice, because humans
+    // are seated first and bots after; this is what keeps it true if that
+    // ever stops being so.
+    for (let i = 0; i < keep && i < teams.length; i++) {
+      if (this.entries[i]!.car.team !== teams[i]) {
+        keep = i;
+        break;
+      }
     }
+    // Rounds with fewer bots than the last: surplus cars go too. They used to
+    // be left where they were, frozen on the pitch, because nothing described
+    // them any more and nothing removed them either.
+    keep = Math.min(keep, teams.length);
+    while (this.entries.length > keep) this.dropLastCar();
+
+    const seat = this.net?.carIndex;
+    const perTeam = [0, 0];
+    for (let i = 0; i < this.entries.length; i++) perTeam[this.entries[i]!.car.team]!++;
+    for (let i = this.entries.length; i < teams.length; i++) {
+      const team = teams[i]!;
+      this.dressCar(this.sim.addCar(team, perTeam[team]!++, null), i === seat);
+    }
+
+    if (!this.remoteCarsBuilt) {
+      this.remoteCarsBuilt = true;
+      this.chase.snapTo(this.player.car.position, this.player.car.forward());
+    }
+  }
+
+  /** Removes the last car, simulated and visible, keeping the lists aligned. */
+  private dropLastCar(): void {
+    const entry = this.entries.pop();
+    if (!entry) return;
+    this.sim.removeLastCar();
+    this.render.scene.remove(entry.mesh);
+    this.render.scene.remove(entry.streak.mesh);
+    entry.streak.dispose();
   }
 
   /** The server's run state, mirrored into the one the HUD already reads. */
@@ -732,7 +779,7 @@ export class Game {
       // Driven by the snapshots, not by the round message: the round arrives
       // first, before any snapshot has said how many cars there are, so doing
       // this there left the opposition missing from the client entirely.
-      this.matchRemoteCars(net.snapshotCarCount);
+      this.matchRemoteCars(net.snapshotTeams);
       net.send(input);
     }
     const events = this.sim.step(dt, {
@@ -915,7 +962,7 @@ export class Game {
         fwdX: entry.car.fwd.x,
         fwdZ: entry.car.fwd.z,
         team: entry.car.team,
-        isPlayer: entry.bot === null,
+        isPlayer: entry === player,
       })),
     });
     this.matchHud.update(this.match, dt);

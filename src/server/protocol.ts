@@ -55,6 +55,14 @@ export interface SnapshotMessage {
    */
   ack: number;
   cars: BodyState[];
+  /**
+   * Each car's team, by index.
+   *
+   * A client used to guess -- "mine is blue, everyone else is orange" -- which
+   * painted a co-op teammate as an opponent on its screen and its radar. The
+   * server knows; it says.
+   */
+  teams: (0 | 1)[];
   ball: BodyState;
   /** Match clock and score, so a client needs no second channel for the HUD. */
   clock: number;

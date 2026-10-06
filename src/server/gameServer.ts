@@ -360,6 +360,7 @@ export class GameServer {
       tick: this.tick,
       ack: handle?.ack ?? 0,
       cars: this.sim.cars.map((c) => bodyState(c.car.body)),
+      teams: this.sim.cars.map((c) => c.car.team),
       ball: bodyState(this.sim.ball.body),
       clock: this.sim.match.clock,
       score: [...this.sim.match.score] as [number, number],
