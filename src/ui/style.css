@@ -651,3 +651,28 @@ html, body {
   outline: none;
 }
 .room-input:focus { border-color: rgba(120, 190, 255, 0.8); }
+
+/* The cards are buttons. The picker sits in a layer that lets the pointer
+   through to the game, so each card has to take it back explicitly, or a click
+   lands on nothing -- which is what the live site did. */
+.picker-option {
+  pointer-events: auto;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms, transform 120ms, background 120ms;
+}
+.picker-option:hover,
+.picker-option.on {
+  border-color: rgba(120, 190, 255, 0.85);
+  background: rgba(16, 26, 44, 0.96);
+  transform: translateY(-3px);
+}
+.picker-option:focus-visible { outline: 2px solid rgba(120, 190, 255, 0.9); outline-offset: 2px; }
+/* Someone else is choosing: still readable, plainly not pressable. */
+.upgrade-picker.locked .picker-option {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+}
+.upgrade-picker.locked .picker-option:hover { border-color: rgba(255, 255, 255, 0.14); }

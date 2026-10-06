@@ -87,6 +87,8 @@ export class NetClient {
   onRound: ((round: RoundMessage) => void) | null = null;
   /** Fired when the run's state changes, so the client can mirror it. */
   onRun: ((run: RunMessage) => void) | null = null;
+  /** This client's id on the server, which the run's chooser is named by. */
+  clientId: number | null = null;
   /** The room this client is in, once the server has said. */
   room: string | null = null;
   /** The server turned the connection away, with its reason as a close code. */
@@ -155,6 +157,7 @@ export class NetClient {
     if (message.type === 'welcome') {
       this.carIndex = message.carIndex;
       this.room = message.room;
+      this.clientId = message.clientId;
       onReady?.();
       return;
     }

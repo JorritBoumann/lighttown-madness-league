@@ -316,3 +316,18 @@ describe('removing a car', () => {
     expect(snap.teams.length).toBe(count - 1);
   });
 });
+
+describe('knowing whether it is your pick', () => {
+  it('names each client in its welcome by the id the run uses for the chooser', () => {
+    // Without this a client cannot tell "my pick" from "someone else's", and
+    // shows live cards that do nothing when pressed -- which reads as frozen.
+    const s = server();
+    const host = s.join()!;
+    const other = s.join()!;
+    s.run.finishRound({ winner: 0, score: [1, 0], overtime: false, reason: 'time' }, 10);
+    const chooser = s.runState().chooser;
+    if (host.welcome.type !== 'welcome' || other.welcome.type !== 'welcome') throw new Error();
+    expect(host.welcome.clientId).toBe(chooser);
+    expect(other.welcome.clientId).not.toBe(chooser);
+  });
+});

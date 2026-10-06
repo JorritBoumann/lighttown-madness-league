@@ -86,6 +86,9 @@ const GOAL_COLOUR_ORANGE = new THREE.Color(0xffa070);
 const TRAIL_COLOUR_BLUE = new THREE.Color(0xffc14d);
 const TRAIL_COLOUR_ORANGE = new THREE.Color(0xff8a50);
 
+/** How long the upgrade picker ignores keys and buttons after it opens. */
+const PICKER_GRACE_MS = 600;
+
 /** A server URL without its query, for showing to a person. */
 function serverLabel(url: string): string {
   return url.split('?')[0] ?? url;
@@ -156,6 +159,12 @@ export class Game {
    * which is the point of having moved the simulation out in the first place.
    */
   private net: NetClient | null = null;
+  /** The upgrade card a pad or the arrows would take. */
+  private pickerIndex = 0;
+  /** When the picker opened, for the grace period. */
+  private pickerOpenedAt = -1;
+  /** True online when someone else is the one choosing. */
+  private pickerLocked = false;
   /** Whether the car list has been rebuilt from the server's yet. */
   private remoteCarsBuilt = false;
   /** The round's tuning when a server is dictating it. */
@@ -260,6 +269,7 @@ export class Game {
     this.radar = new Radar(ui);
     this.matchHud = new MatchHud(ui);
     this.runHud = new RunHud(ui);
+    this.runHud.onPick = (index) => this.takeUpgrade(index);
     this.replayHud = new ReplayHud(ui);
     this.shell = new Shell(ui);
     this.shell.onlineAvailable = configuredServer() !== null;
@@ -551,7 +561,10 @@ export class Game {
     this.runHud.showOwned(run.upgrades);
 
     if (message.phase === 'between' && run.offer.length > 0) {
-      this.runHud.offerUpgrades(run.spec ?? this.run.spec!, run.offer);
+      // Only one person picks. Everyone else is told who, rather than being
+      // shown cards that do nothing when pressed -- which reads as stuck.
+      const mine = message.chooser !== null && message.chooser === this.net?.clientId;
+      this.openPicker(run.spec ?? this.run.spec!, run.offer, mine ? null : 'Your teammate');
     }
   }
 
@@ -920,6 +933,12 @@ export class Game {
     // render delta, which is the frame time whatever the physics did inside it.
     this.render.pace(dt * 1000);
 
+    // Before the replay, not after it. The winning goal starts a replay at the
+    // same moment the picker opens, and a replay frame returns early -- so a
+    // pick pressed during it was read by nobody and then cleared, and the
+    // picker looked frozen for five seconds.
+    this.handlePicker();
+
     if (this.updateReplay(dt)) {
       // Playing back: the meshes and the camera are the replay's, and the
       // live trails would be drawn from stale positions.
@@ -996,16 +1015,6 @@ export class Game {
     if (this.controls.pressed('mute')) this.sound.toggleMute();
     if (this.controls.pressed('resetBall')) this.ball.reset();
 
-    // Between rounds, 1 to 3 take an upgrade. The run waits rather than being
-    // timed out: the pick is the player's, and nothing is lost by waiting.
-    if (!this.freePlay && this.run.phase === 'between') {
-      for (let i = 0; i < 3; i++) {
-        if (this.controls.pressed(`pick${i + 1}` as 'pick1' | 'pick2' | 'pick3')) {
-          this.pickUpgrade(i);
-          break;
-        }
-      }
-    }
   }
 
   // --- screens -----------------------------------------------------------
@@ -1365,6 +1374,68 @@ export class Game {
     }
   }
 
+  /** Opens the upgrade picker, with the first card highlighted. */
+  private openPicker(spec: RoundSpec, offer: readonly Upgrade[], waitingFor: string | null): void {
+    this.runHud.offerUpgrades(spec, offer, waitingFor);
+    this.pickerIndex = 0;
+    this.pickerLocked = waitingFor !== null;
+    if (!this.pickerLocked) this.runHud.highlightOption(0);
+    this.pickerOpenedAt = performance.now();
+  }
+
+  /**
+   * Every way to take an upgrade, in one place: 1 to 3, the arrows or A/D or
+   * the d-pad to move and Enter, Space or A to take, and the cards themselves.
+   *
+   * A pad had no way at all before -- the number shortcuts were keyboard-only
+   * and nothing else picked -- so anyone on a controller who cleared a round
+   * was stuck on this screen for good.
+   */
+  private handlePicker(): void {
+    if (this.freePlay || this.run.phase !== 'between' || this.pickerLocked) return;
+    if (!this.runHud.pickerOpen) return;
+    const count = this.run.offer.length;
+    if (count === 0) return;
+
+    // A moment's grace before anything is taken. The winning goal is usually
+    // scored mid-jump, and jump is Space on a keyboard and A on a pad -- both of
+    // which also mean "take this one". Without the pause, the press that put
+    // the ball in takes the first card before anyone has seen the three.
+    if (performance.now() - this.pickerOpenedAt < PICKER_GRACE_MS) return;
+
+    const c = this.controls;
+    if (c.pressed('menuLeft') || c.pressed('menuUp')) {
+      this.pickerIndex = (this.pickerIndex - 1 + count) % count;
+      this.runHud.highlightOption(this.pickerIndex);
+      this.sound.menuMove();
+    }
+    if (c.pressed('menuRight') || c.pressed('menuDown')) {
+      this.pickerIndex = (this.pickerIndex + 1) % count;
+      this.runHud.highlightOption(this.pickerIndex);
+      this.sound.menuMove();
+    }
+
+    let chosen = -1;
+    const keys = ['pick1', 'pick2', 'pick3'] as const;
+    for (const [i, key] of keys.entries()) if (c.pressed(key)) chosen = i;
+    if (chosen < 0 && c.pressed('menuSelect')) chosen = this.pickerIndex;
+    if (chosen >= 0 && chosen < count) this.takeUpgrade(chosen);
+  }
+
+  /** Takes a card, cutting short a replay if one is playing over the picker. */
+  private takeUpgrade(index: number): void {
+    if (this.pickerLocked || this.run.phase !== 'between') return;
+    if (this.replay.playing) {
+      this.replay.stop();
+      this.replayHud.hide();
+      this.sound.replaySting(false);
+      this.restoreFromReplay();
+    }
+    this.replayPending = -1;
+    this.sound.menuSelect();
+    this.pickUpgrade(index);
+  }
+
   /** Takes the nth offered upgrade. Exposed for the console and for tests. */
   pickUpgrade(index: number): void {
     // Joined to a server, the pick is a request: the server decides whether
@@ -1400,7 +1471,7 @@ export class Game {
     const handlers = {
       onRoundStart: (spec: RoundSpec) => this.applyRound(spec),
       onRoundCleared: (spec: RoundSpec, _stats: unknown, offer: readonly Upgrade[]) =>
-        this.runHud.offerUpgrades(spec, offer),
+        this.openPicker(spec, offer, null),
       onUpgradeTaken: (_upgrade: Upgrade, owned: readonly Upgrade[]) =>
         this.runHud.showOwned(owned),
       onRunOver: (summary: RunSummary) => {

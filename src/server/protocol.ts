@@ -14,6 +14,8 @@ export interface WelcomeMessage {
   type: 'welcome';
   /** The room joined, so a client that asked for a new one learns its code. */
   room: string;
+  /** This client's id, which is what `RunMessage.chooser` names. */
+  clientId: number;
   /** Which car in the snapshot is this client's. */
   carIndex: number;
   /** Fixed step the server runs at, so a client can predict at the same rate. */

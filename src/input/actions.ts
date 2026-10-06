@@ -14,6 +14,8 @@ export type Action =
   | 'resetBall'
   | 'menuUp'
   | 'menuDown'
+  | 'menuLeft'
+  | 'menuRight'
   | 'menuSelect'
   | 'pick1'
   | 'pick2'
@@ -29,6 +31,8 @@ export const KEY_BINDINGS: Readonly<Record<Action, readonly string[]>> = {
   resetBall: ['KeyB'],
   menuUp: ['ArrowUp', 'KeyW'],
   menuDown: ['ArrowDown', 'KeyS'],
+  menuLeft: ['ArrowLeft', 'KeyA'],
+  menuRight: ['ArrowRight', 'KeyD'],
   menuSelect: ['Enter', 'Space'],
   pick1: ['Digit1'],
   pick2: ['Digit2'],
@@ -49,6 +53,8 @@ export const PAD_BINDINGS: Readonly<Record<Action, readonly number[]>> = {
   resetBall: [],
   menuUp: [12],
   menuDown: [13],
+  menuLeft: [14],
+  menuRight: [15],
   menuSelect: [0],
   // Menu items are chosen with the stick and A on a pad; the numbered
   // shortcuts stay keyboard-only rather than being mapped to arbitrary buttons.

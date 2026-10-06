@@ -64,24 +64,52 @@ export class RunHud {
     this.owned = this.root.querySelector('[data-owned]') as HTMLElement;
   }
 
-  /** Shows the three upgrades on offer after a cleared round. */
-  offerUpgrades(spec: RoundSpec, offer: readonly Upgrade[]): void {
+  /** Called with the index of a card someone clicked or tapped. */
+  onPick: ((index: number) => void) | null = null;
+
+  /**
+   * Shows the three upgrades on offer after a cleared round.
+   *
+   * The cards are buttons. They used to be keyboard-only, and they looked like
+   * buttons on a page people click: on the live site a click did nothing, and
+   * because the whole UI layer lets the pointer through, it did not even reach
+   * the card to do nothing. `waitingFor` is set online when someone else is
+   * choosing, so the cards say so instead of ignoring you.
+   */
+  offerUpgrades(spec: RoundSpec, offer: readonly Upgrade[], waitingFor: string | null = null): void {
     this.hideCard();
     (this.root.querySelector('[data-picker-title]') as HTMLElement).textContent =
       `Round ${spec.index} cleared`;
+    (this.root.querySelector('.picker-sub') as HTMLElement).textContent = waitingFor
+      ? `${waitingFor} is choosing an upgrade for you both.`
+      : 'Pick one. It lasts the rest of the run.';
+    this.picker.classList.toggle('locked', waitingFor !== null);
     this.pickerOptions.innerHTML = '';
     for (const [i, upgrade] of offer.entries()) {
-      const option = document.createElement('div');
+      const option = document.createElement('button');
+      option.type = 'button';
       option.className = 'picker-option';
+      option.disabled = waitingFor !== null;
       option.innerHTML = `
         <div class="picker-key">${i + 1}</div>
         <div class="picker-name"></div>
         <div class="picker-desc"></div>`;
       (option.querySelector('.picker-name') as HTMLElement).textContent = upgrade.name;
       (option.querySelector('.picker-desc') as HTMLElement).textContent = upgrade.description;
+      option.addEventListener('click', () => this.onPick?.(i));
       this.pickerOptions.appendChild(option);
     }
     this.picker.hidden = false;
+  }
+
+  /** Marks the card a pad or the arrow keys would take. */
+  highlightOption(index: number): void {
+    const options = this.pickerOptions.querySelectorAll('.picker-option');
+    options.forEach((el, i) => el.classList.toggle('on', i === index));
+  }
+
+  get pickerOpen(): boolean {
+    return !this.picker.hidden;
   }
 
   /** Free play has no round, no objective and no modifiers to show. */

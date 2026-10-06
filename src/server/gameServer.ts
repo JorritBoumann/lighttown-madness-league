@@ -308,6 +308,7 @@ export class GameServer {
       welcome: {
         type: 'welcome',
         room: this.options.code ?? '',
+        clientId: handle.id,
         carIndex,
         stepSeconds: this.stepSeconds,
         snapshotHz: SNAPSHOT_HZ,
