@@ -13,6 +13,7 @@ import { BOSSES } from './state/bosses';
 import { UPGRADES } from './state/upgrades';
 import { CLOSE, type RoundMessage, type RunMessage } from './server/protocol';
 import { normaliseCode } from './server/roomCode';
+import { configuredServer } from './net/serverAddress';
 import type { MatchPhase } from './state/match';
 import { Controls } from './input/controls';
 import { emptyInput, type CarInput } from './input/types';
@@ -84,18 +85,6 @@ const GOAL_COLOUR_BLUE = new THREE.Color(0x7fd4ff);
 const GOAL_COLOUR_ORANGE = new THREE.Color(0xffa070);
 const TRAIL_COLOUR_BLUE = new THREE.Color(0xffc14d);
 const TRAIL_COLOUR_ORANGE = new THREE.Color(0xff8a50);
-
-/**
- * Where to look for a server when the page was not told.
- *
- * The page's own host on 8080, which is where `npm run server` listens, over
- * `wss` when the page itself is on https -- a browser will not open a plain
- * socket from a secure page.
- */
-function defaultServer(): string {
-  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${location.hostname || 'localhost'}:8080`;
-}
 
 /** A server URL without its query, for showing to a person. */
 function serverLabel(url: string): string {
@@ -266,6 +255,7 @@ export class Game {
     this.runHud = new RunHud(ui);
     this.replayHud = new ReplayHud(ui);
     this.shell = new Shell(ui);
+    this.shell.onlineAvailable = configuredServer() !== null;
     this.panel = new TweakPanel(ui);
     this.panel.onChange(() => this.syncConfig());
 
@@ -430,7 +420,11 @@ export class Game {
    */
   private goOnline(room: string): void {
     const params = new URLSearchParams(location.search);
-    params.set('server', params.get('server') ?? defaultServer());
+    const server = configuredServer();
+    // The menu only offers this when there is a server, so this is a guard
+    // against being called some other way, not an expected path.
+    if (!server) return;
+    params.set('server', server);
     params.set('room', room);
     location.search = params.toString();
   }

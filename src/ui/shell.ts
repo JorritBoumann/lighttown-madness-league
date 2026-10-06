@@ -16,6 +16,8 @@ export type Screen = 'title' | 'online' | 'playing' | 'paused' | 'summary';
 export class Shell {
   private readonly menu: MenuScreen;
   screen: Screen = 'title';
+  /** Whether "Play online" goes anywhere. False on a host with no server. */
+  onlineAvailable = false;
 
   constructor(parent: HTMLElement) {
     this.menu = new MenuScreen(parent);
@@ -43,10 +45,12 @@ export class Shell {
       items: [
         { id: 'start', label: 'Start run', hint: 'Round one. Escalates from there.' },
         { id: 'freeplay', label: 'Free play', hint: 'No clock, no opponents. Get a feel for the car.' },
-        { id: 'online', label: 'Play online', hint: 'Make a room, or join one with a code.' },
+        ...(this.onlineAvailable
+          ? [{ id: 'online', label: 'Play online', hint: 'Make a room, or join one with a code.' }]
+          : []),
         { id: 'mute', label: muted ? 'Sound: off' : 'Sound: on' },
       ],
-      footer: 'Arrows or 1-4 to choose · Enter to select',
+      footer: `Arrows or 1-${this.onlineAvailable ? 4 : 3} to choose · Enter to select`,
     });
   }
 
