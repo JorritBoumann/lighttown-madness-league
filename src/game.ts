@@ -10,6 +10,7 @@ import { Simulation, type SimCar } from './sim/simulation';
 import { NetClient } from './net/client';
 import { TouchSource } from './input/touch';
 import { takeScreen } from './ui/fullscreen';
+import type { BlindSide } from './state/blindSide';
 import { MODIFIERS } from './state/modifiers';
 import { BOSSES } from './state/bosses';
 import { UPGRADES } from './state/upgrades';
@@ -420,7 +421,7 @@ export class Game {
         const params = new URLSearchParams(location.search);
         params.set('room', room);
         history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
-        this.hud.showRoom(room);
+        this.hud.showRoom(room, net.recording);
       }
     });
   }
@@ -498,6 +499,9 @@ export class Game {
       modifiers,
       rules: round.rules,
       label: round.label,
+      // Never sent: the bots that need it are on the server, and anything on
+      // the wire is something a curious player can read.
+      blindSide: null,
     };
 
     this.run.spec = spec;
@@ -668,7 +672,7 @@ export class Game {
       this.rebuiltArena = needsArenaRebuild(spec.modifiers);
     }
 
-    this.setOpponents(spec.lineup);
+    this.setOpponents(spec.lineup, spec.blindSide);
     this.syncConfig();
     this.runHud.showOwned(this.run.upgrades);
 
@@ -701,8 +705,8 @@ export class Game {
    * to match. The two lists stay index-aligned because the simulation only ever
    * appends and pops, and `dressCar` appends in the same order.
    */
-  private setOpponents(lineup: readonly RoundOpponent[]): void {
-    const { added, removed } = this.sim.setOpponents(lineup);
+  private setOpponents(lineup: readonly RoundOpponent[], blindSide: BlindSide | null = null): void {
+    const { added, removed } = this.sim.setOpponents(lineup, blindSide);
     for (const sim of added) this.dressCar(sim, false);
     for (let i = 0; i < removed.length; i++) {
       const entry = this.entries.pop();

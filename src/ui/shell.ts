@@ -71,6 +71,11 @@ export class Shell {
     this.menu.show({
       title: 'Play online',
       subtitle: 'A shared run against the bots, with up to two of you in a room.',
+      // Before anyone is in a room, not after: the choice to play is the
+      // moment to know. Recorded rooms also say so beside their code.
+      bodyHtml:
+        '<p class="menu-note">Rooms may be recorded for research: the match and everyone\u2019s ' +
+        'controls, and nothing about who you are. A recorded room says so beside its code.</p>',
       items: [
         { id: 'create', label: 'Make a room', hint: 'You get a code to send to a friend.' },
         { id: 'joinroom', label: 'Join a room', hint: 'Type the code someone sent you.' },

@@ -5,6 +5,7 @@ import { Car } from '../physics/car';
 import { BoostPads, type BoostPad } from '../physics/boostPads';
 import { CarBallInteraction } from '../physics/carBall';
 import { Bot, type BotRole } from '../ai/bot';
+import type { BlindSide } from '../state/blindSide';
 import { kickoffSpawns, type Spawn } from '../core/arenaLayout';
 import { Match, type MatchHandlers } from '../state/match';
 import type { MatchRules } from '../state/match';
@@ -142,7 +143,10 @@ export class Simulation {
    * Returns the cars that were removed, because the caller is holding meshes
    * and trails that belong to them and has no other way to know they are gone.
    */
-  setOpponents(lineup: readonly RoundOpponent[]): { added: SimCar[]; removed: SimCar[] } {
+  setOpponents(
+    lineup: readonly RoundOpponent[],
+    blindSide: BlindSide | null = null,
+  ): { added: SimCar[]; removed: SimCar[] } {
     const existing = this.cars.filter((c) => c.bot !== null).length;
     const added: SimCar[] = [];
     const removed: SimCar[] = [];
@@ -164,6 +168,7 @@ export class Simulation {
       if (!spot) continue;
       entry.bot.setLevel(spot.tier);
       entry.bot.setRole(spot.role);
+      entry.bot.blindSide = blindSide;
     }
     return { added, removed };
   }

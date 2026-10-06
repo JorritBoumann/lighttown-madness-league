@@ -21,6 +21,17 @@ primary_region = 'ams'
   # About 8.5MB a room, measured: twelve stays well inside 512MB, and inside
   # what a shared CPU can step at 120Hz without leaning on its burst.
   MAX_ROOMS = '12'
+  # Matches are recorded for research, onto the volume below; players are
+  # told. 800MB is about seventy hours of play, and the server stops starting
+  # new recordings beyond it rather than filling the disk.
+  RECORD_DIR = '/data/recordings'
+  RECORD_MAX_MB = '800'
+
+# Survives restarts and deploys, unlike the machine's own disk. Created with
+#   fly volumes create recordings --region ams --size 1
+[mounts]
+  source = 'recordings'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080

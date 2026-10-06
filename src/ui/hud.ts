@@ -91,7 +91,7 @@ export class Hud {
    * It is the thing you read out to someone who wants to join, and asking them
    * to dig through a menu for it mid-match is asking them not to bother.
    */
-  showRoom(code: string): void {
+  showRoom(code: string, recording = false): void {
     let chip = this.root.querySelector<HTMLElement>('.hud-room');
     if (!chip) {
       chip = document.createElement('div');
@@ -99,6 +99,16 @@ export class Hud {
       this.root.appendChild(chip);
     }
     chip.textContent = `Room ${code}`;
+    // Said where it is always visible, for as long as it is true: someone
+    // whose play is being written down should not have to have read a menu
+    // to know it.
+    if (recording) {
+      const rec = document.createElement('span');
+      rec.className = 'hud-rec';
+      rec.textContent = 'Recorded';
+      chip.title = 'This match is recorded for research: the game and everyone\u2019s controls. Nothing about who you are.';
+      chip.appendChild(rec);
+    }
   }
 
   private setFlag(name: string, on: boolean): void {

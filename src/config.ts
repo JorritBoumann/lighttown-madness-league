@@ -869,6 +869,48 @@ export const config = {
     shake: 1,
     speedFovGain: 8,
   },
+
+  /**
+   * Research experiments: things changed in the game in order to measure
+   * something about the people playing it.
+   */
+  experiment: {
+    /**
+     * The blind side: each run, the opposition is quietly worse on one side of
+     * the pitch, and nobody is told which.
+     *
+     * The question it asks is whether players notice and exploit it -- whether
+     * their play drifts toward the weak side as a run goes on -- which is a
+     * test of memory across rounds. Chosen per run, not per round, so the thing
+     * to remember stays put long enough to be learned, and moves between runs
+     * so it cannot simply be known.
+     */
+    blindSide: {
+      enabled: true,
+      /**
+       * 0 to 1: how much of the handicap below applies.
+       *
+       * Saves are a knife-edge, so this bites early. Measured with a Pro keeper
+       * facing fifty shots at each post: unhandicapped it lets in 5 to 7 at
+       * either; at 0.3 it lets in 15 at the blind post, and from about 0.45 it
+       * lets in every shot on target there, which is no longer a weakness to be
+       * found but a keeper missing. 0.4 is clear in the data without being
+       * obvious from one shot.
+       */
+      strength: 0.4,
+      /** Seconds added to the bot's reaction delay, at full strength. */
+      extraDelay: 0.35,
+      /** Throttle cap multiplier there, at full strength. */
+      throttleScale: 0.6,
+      /** How far off the centre line, in uu, the ball must be to count as on a
+       *  side. The middle third of a pitch 8192 wide is neither. */
+      margin: 700,
+      /** How far the bot's defensive spot leans to its strong post, in uu, at
+       *  full strength. Leaving the blind post open is the part a player can
+       *  actually see, and so the part that can be learned. */
+      postLean: 380,
+    },
+  },
 };
 
 export type Config = typeof config;

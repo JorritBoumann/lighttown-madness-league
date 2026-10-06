@@ -3,6 +3,7 @@ import { isBossRound } from './bosses';
 import type { MatchResult } from './match';
 import { loadBestRun, saveBestRun, type BestRun } from './persistence';
 import { offerUpgrades, type Upgrade } from './upgrades';
+import { pickBlindSide, type BlindSide } from './blindSide';
 
 /**
  * A run: a sequence of escalating rounds that have to be cleared back to back.
@@ -119,6 +120,8 @@ export class Run {
   readonly upgrades: Upgrade[] = [];
   /** The three on offer while between rounds; empty otherwise. */
   offer: Upgrade[] = [];
+  /** The opposition's hidden weak side for this run; see blindSide.ts. */
+  blindSide: BlindSide | null = null;
 
   constructor(
     private readonly handlers: RunHandlers = {},
@@ -143,6 +146,7 @@ export class Run {
     this.summary = null;
     this.upgrades.length = 0;
     this.offer = [];
+    this.blindSide = pickBlindSide(this.random);
     this.beginRound(1);
   }
 
@@ -206,7 +210,7 @@ export class Run {
   }
 
   private beginRound(index: number): void {
-    this.spec = buildRound(index, this.random);
+    this.spec = buildRound(index, this.random, this.blindSide);
     this.phase = 'round';
     this.handlers.onRoundStart?.(this.spec);
   }

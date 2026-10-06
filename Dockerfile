@@ -16,10 +16,12 @@ FROM node:24-slim
 WORKDIR /app
 COPY --from=build /app/dist-server/main.js ./main.js
 COPY --from=build /app/dist ./site
+COPY docker-entry.sh ./
 ENV NODE_ENV=production PORT=8080 SITE_DIR=/app/site
 EXPOSE 8080
-USER node
+# Starts as root only to hand a mounted recordings folder to `node`, then runs
+# the server as `node`; see docker-entry.sh.
 # The same check a host would make: the server answers plain HTTP on /health.
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
-CMD ["node", "main.js"]
+CMD ["./docker-entry.sh"]

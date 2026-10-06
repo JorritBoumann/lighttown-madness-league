@@ -1,4 +1,5 @@
 import { GameServer, type ServerOptions } from './gameServer';
+import type { Recorder } from './recorder';
 import { generateCode, normaliseCode } from './roomCode';
 
 export { generateCode, normaliseCode, CODE_LENGTH } from './roomCode';
@@ -33,6 +34,8 @@ export interface RegistryOptions {
   /** Seconds an empty room survives before it is thrown away. */
   idleTimeout?: number;
   random?: () => number;
+  /** A recorder for a new room, or null not to record it. */
+  recorderFor?: (code: string) => Recorder | null;
 }
 
 export class RoomRegistry {
@@ -55,7 +58,11 @@ export class RoomRegistry {
       if (this.rooms.has(code)) continue;
       const room: Room = {
         code,
-        game: new GameServer({ ...this.options.room, code }),
+        game: new GameServer({
+          ...this.options.room,
+          code,
+          recorder: this.options.recorderFor?.(code) ?? null,
+        }),
         emptyFor: 0,
       };
       this.rooms.set(code, room);
@@ -95,5 +102,11 @@ export class RoomRegistry {
       }
     }
     return removed;
+  }
+
+  /** Closes every room, for a server that is stopping. */
+  disposeAll(): void {
+    for (const room of this.rooms.values()) room.game.dispose();
+    this.rooms.clear();
   }
 }

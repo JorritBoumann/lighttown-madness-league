@@ -844,3 +844,18 @@ body.touch .pad-row { display: none; }
    card reaches under the Jump button on a phone, and there is nothing to
    drive until a card is picked. */
 #ui:has(.upgrade-picker:not([hidden])) .touch-layer { display: none; }
+
+/* A recorded room says so, beside its code, for as long as it is true. */
+.hud-rec {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffb3b3;
+  background: rgba(255, 80, 80, 0.16);
+  border: 1px solid rgba(255, 110, 110, 0.4);
+}
+.hud-rec::before { content: '\25CF  '; color: #ff6b6b; }
+.menu-note { opacity: 0.8; max-width: 46ch; }

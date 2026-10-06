@@ -91,6 +91,8 @@ export class NetClient {
   clientId: number | null = null;
   /** The room this client is in, once the server has said. */
   room: string | null = null;
+  /** Whether the server records this room, which the player is shown. */
+  recording = false;
   /** The server turned the connection away, with its reason as a close code. */
   onRefused: ((code: number) => void) | null = null;
   /** The connection went after the match had started. */
@@ -158,6 +160,7 @@ export class NetClient {
       this.carIndex = message.carIndex;
       this.room = message.room;
       this.clientId = message.clientId;
+      this.recording = message.recording === true;
       onReady?.();
       return;
     }

@@ -6,6 +6,7 @@ import { RoomRegistry, type Room } from './rooms';
 import { CLOSE, decodeClient, encode, type ServerMessage } from './protocol';
 import { cfg } from '../config';
 import { Site } from './site';
+import { RecordingStore } from './recordingStore';
 
 /**
  * The server.
@@ -46,6 +47,13 @@ const MAX_CATCHUP_SECONDS = 0.25;
  */
 const SITE_DIR = process.env.SITE_DIR;
 /**
+ * Where to record matches for research; unset records nothing. Players are
+ * told when the room they are in is recorded. See recorder.ts for the format.
+ */
+const RECORD_DIR = process.env.RECORD_DIR;
+/** Stop starting new recordings past this size, so they cannot fill a disk. */
+const RECORD_MAX_MB = Number(process.env.RECORD_MAX_MB ?? 800);
+/**
  * Pages allowed to connect, comma-separated; unset allows any.
  *
  * A browser always sends the page's origin on a WebSocket upgrade, so this is
@@ -62,10 +70,13 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
 async function main(): Promise<void> {
   await initPhysics();
 
+  const store = RECORD_DIR ? new RecordingStore(RECORD_DIR, RECORD_MAX_MB * 1e6) : null;
+  if (store) log(`recording rooms to ${RECORD_DIR} (up to ${RECORD_MAX_MB}MB)`);
   const registry = new RoomRegistry({
     room: { botOpponents: BOTS, maxClients: SEATS },
     maxRooms: MAX_ROOMS,
     idleTimeout: IDLE_SECONDS,
+    recorderFor: (code) => store?.recorderFor(code) ?? null,
   });
   // Client ids are only unique within a room, so sockets are filed per room.
   const sockets = new Map<string, Map<number, WebSocket>>();
@@ -133,7 +144,10 @@ async function main(): Promise<void> {
       // With the page it came from: which origins actually connect is what
       // ALLOWED_ORIGINS has to be set from, and a page embedded in a
       // sandboxed frame says "null" rather than its address.
-      log(`room ${room.code} opened from ${request.headers.origin ?? 'no origin'} (${registry.size} live)`);
+      log(
+        `room ${room.code} opened from ${request.headers.origin ?? 'no origin'}` +
+          `${room.game.recording ? ', recording' : store ? ', not recording: folder full' : ''} (${registry.size} live)`,
+      );
     } else {
       room = registry.get(asked);
       if (!room) {
@@ -276,15 +290,27 @@ async function main(): Promise<void> {
   };
 
   const timer = setInterval(tick, step);
+  const flusher = store ? setInterval(() => store.flush(), 5000) : null;
+
+  let stopping = false;
   const shutdown = (): void => {
+    if (stopping) return;
+    stopping = true;
     clearInterval(timer);
+    if (flusher) clearInterval(flusher);
     // Told, rather than cut off: a client sees a clean close and says the
     // match ended, instead of waiting out a timeout on a socket that is gone.
     for (const client of wss.clients) client.close(1001, 'server stopping');
     wss.close();
     http.close();
-    log('stopped');
-    process.exit(0);
+    // Closing the rooms closes their recordings; waiting for the files is what
+    // stops a deploy or an idle stop cutting the last seconds off each one.
+    registry.disposeAll();
+    const settled = store ? store.settled() : Promise.resolve();
+    void settled.then(() => {
+      log('stopped');
+      process.exit(0);
+    });
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

@@ -6,6 +6,7 @@ import { applyUpgrades } from '../state/upgrades';
 import { resetModifiers } from '../physics/car';
 import type { RoundSpec } from '../state/round';
 import { emptyInput, type CarInput } from '../input/types';
+import type { Recorder } from './recorder';
 import type {
   BodyState,
   GoalMessage,
@@ -46,6 +47,8 @@ export interface ServerOptions {
   maxClients?: number;
   /** Seeded for reproducibility; defaults to Math.random. */
   random?: () => number;
+  /** Writes the match down for research, when set. See recorder.ts. */
+  recorder?: Recorder | null;
   /**
    * Seconds between a run ending and the next one starting.
    *
@@ -95,6 +98,8 @@ export class GameServer {
     const seats = options.maxClients ?? 2;
     for (let i = 0; i < seats; i++) this.sim.addCar(0, i, null);
     this.seats = seats;
+    this.recorder = options.recorder ?? null;
+    this.recorder?.header({ room: options.code ?? '', stepSeconds: this.stepSeconds, seats });
 
     this.run = new Run(
       {
@@ -106,6 +111,13 @@ export class GameServer {
   }
 
   private readonly seats: number;
+  private readonly recorder: Recorder | null;
+  private lastRecordedRun = '';
+
+  /** Whether this room's matches are written down, which players are told. */
+  get recording(): boolean {
+    return this.recorder !== null;
+  }
 
   /**
    * Sets the world up for a round: modifiers, upgrades, arena, opposition.
@@ -135,10 +147,14 @@ export class GameServer {
       this.rebuiltArena = needsArenaRebuild(spec.modifiers);
     }
 
-    this.sim.setOpponents(spec.lineup.slice(0, this.options.botOpponents ?? spec.lineup.length));
+    this.sim.setOpponents(
+      spec.lineup.slice(0, this.options.botOpponents ?? spec.lineup.length),
+      spec.blindSide,
+    );
     this.sim.syncConfig();
     this.sim.startMatch(spec.rules, {
       onGoal: (event) => {
+        this.recorder?.goal(this.tick, event.team, event.ownGoal, event.score, this.sim);
         this.pendingGoal = {
           type: 'goal',
           team: event.team,
@@ -149,11 +165,13 @@ export class GameServer {
       },
       onKickoff: () => {
         this.sim.resetKickoff();
+        this.recorder?.kickoff(this.tick);
         this.pendingKickoff = true;
       },
       onEnd: (result) => this.run.finishRound(result, this.sim.match.playedSeconds),
     });
     this.sim.resetKickoff();
+    this.recorder?.round(this.tick, spec, this.sim);
 
     this.pendingRound = this.roundMessage(rebuild);
   }
@@ -303,7 +321,7 @@ export class GameServer {
       pending: emptyInput(),
     };
     this.clients.set(handle.id, handle);
-    return {
+    const joined: { handle: ClientHandle; welcome: ServerMessage } = {
       handle,
       welcome: {
         type: 'welcome',
@@ -312,14 +330,18 @@ export class GameServer {
         carIndex,
         stepSeconds: this.stepSeconds,
         snapshotHz: SNAPSHOT_HZ,
+        recording: this.recording,
       },
     };
+    this.recorder?.join(this.tick, handle.id, carIndex);
+    return joined;
   }
 
   leave(id: number): void {
     const handle = this.clients.get(id);
     if (!handle) return;
     this.clients.delete(id);
+    this.recorder?.leave(this.tick, id, handle.carIndex);
     // The car stays where it is and simply stops being driven, which is the
     // least surprising thing for everyone still playing.
     this.inputs.set(handle.carIndex, emptyInput());
@@ -344,13 +366,24 @@ export class GameServer {
       // other one.
       handle.pending = { ...handle.pending, jumpPressed: false };
     }
-    this.sim.step(this.stepSeconds, {
+    const events = this.sim.step(this.stepSeconds, {
       driving: true,
       frozen: false,
       clock: true,
       inputs: this.inputs,
     });
     this.tick++;
+    // Only while someone is here: a room left empty keeps playing for a minute
+    // in case they come back, and bots playing to nobody is not data.
+    if (this.recorder && this.clients.size > 0) {
+      this.recorder.step(this.tick, this.sim, events);
+      const run = this.runState();
+      const json = JSON.stringify(run);
+      if (json !== this.lastRecordedRun) {
+        this.lastRecordedRun = json;
+        this.recorder.run(this.tick, run);
+      }
+    }
   }
 
   /** The state to send one client. Identical but for the acknowledgement. */
@@ -371,6 +404,7 @@ export class GameServer {
 
   /** Frees the simulation. The server must not be used afterwards. */
   dispose(): void {
+    this.recorder?.close(this.tick);
     this.sim.dispose();
   }
 

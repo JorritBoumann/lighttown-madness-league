@@ -1044,6 +1044,46 @@ wrong guesses to find: that a committed bot aims at the near side of the ball
 rather than past it, that it leads the shot to cancel a drifting ball, and that
 conversion stays ordered by tier.
 
+## Research: recordings and the blind side
+
+Two things for studying the people who play, rather than for playing.
+
+### Recording
+
+With `RECORD_DIR` set, the server writes each room's match to a gzipped file
+of one JSON object per line: every car's controls at every step (people and
+bots alike), every body in the world 30 times a second, and each touch, goal,
+kickoff, round and upgrade. The first line explains the file's own format.
+Nothing about the people is kept -- no address, name or device; a player is a
+number that is only unique within the room. Steps are only written while
+someone is in the room.
+
+Players are told: the Play online screen says rooms may be recorded, and a
+recorded room says **Recorded** beside its code for as long as it is.
+
+The live server records to a Fly volume. To fetch everything recorded so far:
+
+```bash
+npm run recordings:pull     # into ./recordings, which git ignores
+```
+
+### The blind side
+
+Each run, the opposition is quietly worse on one side of the pitch -- later
+to react, slower, no boost or aerials, and its defending leans to the other
+post -- and nobody is told which. The side is picked per run, so it is there
+to be learned across rounds and cannot simply be known. It is in each
+recording's `round` lines, and nowhere a player can see it. Tuning is
+`cfg.experiment.blindSide`; at the default strength a Pro keeper lets in about
+twice as many at the blind post as at the other, which `blindSide.test.ts`
+holds it to.
+
+The question is whether players find it. `npm run analyse -- recordings`
+answers from the recordings: per run and per round, where the players touch
+the ball in the half they attack and how their attacks down each side end,
+then the share on the blind side by round across every run. A rising share
+means people noticed.
+
 ## Known gaps
 
 Honest list of what is not there, in rough order of how much it matters:

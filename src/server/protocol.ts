@@ -22,6 +22,8 @@ export interface WelcomeMessage {
   stepSeconds: number;
   /** Ticks per second the server sends snapshots at. */
   snapshotHz: number;
+  /** This room's matches are recorded for research; the client says so. */
+  recording?: boolean;
 }
 
 /**

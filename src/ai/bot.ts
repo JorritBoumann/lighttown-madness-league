@@ -13,6 +13,7 @@ import {
   type PredictedSample,
 } from './ballPrediction';
 import { tier, type BotTier } from './tiers';
+import { sideOf, type BlindSide } from '../state/blindSide';
 import {
   pointNoseAt,
   aerialCost,
@@ -146,6 +147,12 @@ export class Bot {
 
   role: BotRole;
 
+  /**
+   * A side of the pitch this bot is weak on, or null. The memory experiment's
+   * hidden handicap; see `cfg.experiment.blindSide` for what and why.
+   */
+  blindSide: BlindSide | null = null;
+
   constructor(
     readonly car: Car,
     level: number,
@@ -176,6 +183,27 @@ export class Bot {
 
   private get targetGoalX(): number {
     return -this.ownGoalX;
+  }
+
+  /**
+   * How much of the blind-side handicap applies right now: its strength when
+   * the ball really is on that side, else 0.
+   *
+   * Judged on where the ball actually is, not on the delayed copy the bot
+   * acts on, because the handicap is the delay -- deciding it from the late
+   * ball would let the bot notice the ball crossing over only after it was
+   * already being slow about it, which is the same thing twice.
+   */
+  private blindness(): number {
+    const b = this.blindSide;
+    const latest = this.memory[this.memory.length - 1];
+    if (!b || !latest) return 0;
+    return sideOf(latest.snapshot.position.z) === b.side ? b.strength : 0;
+  }
+
+  /** The reaction delay in force: the tier's, and more on the blind side. */
+  private reactionDelay(): number {
+    return this.tier.reactionDelay + this.blindness() * cfg.experiment.blindSide.extraDelay;
   }
 
   /** Decides what to do and returns the input for this step. */
@@ -227,7 +255,7 @@ export class Bot {
     }
 
     this.mode = this.chooseMode(ball, world);
-    if (this.tier.usesAerials && this.car.grounded) {
+    if (this.tier.usesAerials && this.car.grounded && this.blindness() === 0) {
       // Two searches, asking different questions, and the threat decides which
       // — not the mode. A shot flying over a goalside defender's head reads as
       // 'attack' here, because the bot is between the ball and its own net and
@@ -271,13 +299,16 @@ export class Bot {
       },
     });
     // Keep a little more than the delay needs.
-    const cutoff = this.clock - (this.tier.reactionDelay + 0.1);
+    // Enough for the longest delay this bot could be on, blind side included,
+    // or the buffer is already gone when the ball crosses over.
+    const longest = this.tier.reactionDelay + (this.blindSide ? cfg.experiment.blindSide.extraDelay : 0);
+    const cutoff = this.clock - (longest + 0.1);
     while (this.memory.length > 1 && this.memory[0]!.time < cutoff) this.memory.shift();
   }
 
   /** The ball as the bot currently believes it to be: a little out of date. */
   private recallBall(): BallSnapshot {
-    const wanted = this.clock - this.tier.reactionDelay;
+    const wanted = this.clock - this.reactionDelay();
     // The buffer is short, so a scan is cheaper than anything clever.
     for (let i = this.memory.length - 1; i >= 0; i--) {
       if (this.memory[i]!.time <= wanted) return this.memory[i]!.snapshot;
@@ -537,7 +568,12 @@ export class Bot {
     // A keeper hugs the line; everyone else pushes further up.
     const reach = this.role === 'keeper' ? cfg.ai.keeperStandoff : cfg.ai.defendStandoff;
     const standoff = Math.min(reach, len * 0.6);
-    this.target.set(goalX + (dx / len) * standoff, 0, (dz / len) * standoff);
+    // Leaning to the strong post, whichever side the ball is: the open post is
+    // the part of the weakness a player can see, so it is what can be learned.
+    const lean = this.blindSide
+      ? -this.blindSide.side * this.blindSide.strength * cfg.experiment.blindSide.postLean
+      : 0;
+    this.target.set(goalX + (dx / len) * standoff, 0, (dz / len) * standoff + lean);
   }
 
   private aimAtPad(world: BotWorld): void {
@@ -558,6 +594,8 @@ export class Bot {
     const t = this.tier;
     const i = this.input;
     Object.assign(i, emptyInput());
+    const blind = this.blindness();
+    const throttleCap = t.throttleCap * (1 - blind * (1 - cfg.experiment.blindSide.throttleScale));
 
     const p = this.car.position;
     this.toTarget.set(this.target.x - p.x, 0, this.target.z - p.z);
@@ -595,9 +633,9 @@ export class Bot {
       // Braking rather than coasting: steering authority climbs sharply as
       // speed falls, so scrubbing speed turns the car round far faster than
       // arcing round at pace, which is an endless circle.
-      i.throttle = this.car.speed > a.brakeToTurnSpeed ? -1 : 0.6 * t.throttleCap;
+      i.throttle = this.car.speed > a.brakeToTurnSpeed ? -1 : 0.6 * throttleCap;
     } else {
-      i.throttle = t.throttleCap;
+      i.throttle = throttleCap;
     }
 
     if (t.usesPowerslide && absAngle > a.powerslideAngle && this.car.speed > 700) {
@@ -614,6 +652,7 @@ export class Bot {
     // to wander off it.
     if (
       t.usesBoost &&
+      blind === 0 &&
       this.car.boost > t.boostReserve &&
       absAngle < a.boostAngle &&
       distance > a.boostMinDistance &&
@@ -622,7 +661,7 @@ export class Bot {
       i.boost = true;
     }
 
-    if (t.usesDodges && this.mode === 'attack') {
+    if (t.usesDodges && blind === 0 && this.mode === 'attack') {
       this.maybeAerialOrDodge(i, ball, distance, absAngle);
     }
 

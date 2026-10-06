@@ -3,6 +3,7 @@ import type { MatchRules } from './match';
 import { pickModifiers, MODIFIERS, type Modifier } from './modifiers';
 import { bossForRound, isBossRound, type BossSpec } from './bosses';
 import type { BotRole } from '../ai/bot';
+import type { BlindSide } from './blindSide';
 
 /**
  * Round generation and the escalation curve.
@@ -36,6 +37,12 @@ export interface RoundSpec {
   rules: MatchRules;
   /** Short label for the HUD, e.g. "Pro x2" or the boss's name. */
   label: string;
+  /**
+   * The opposition's hidden weak side, or null. Never shown to the player:
+   * it is the run's, handed to every round of it, and only the bots and the
+   * recordings are told.
+   */
+  blindSide: BlindSide | null;
 }
 
 /** Caps, so the curve flattens rather than running away. */
@@ -71,7 +78,11 @@ export function goalTargetForRound(index: number): number {
   return index >= 5 ? 3 : 2;
 }
 
-export function buildRound(index: number, random: () => number = Math.random): RoundSpec {
+export function buildRound(
+  index: number,
+  random: () => number = Math.random,
+  blindSide: BlindSide | null = null,
+): RoundSpec {
   const curveTier = tierForRound(index);
 
   const baseRules: MatchRules = {
@@ -108,6 +119,7 @@ export function buildRound(index: number, random: () => number = Math.random): R
       modifiers,
       rules: { ...baseRules, ...boss.rules },
       label: boss.name,
+      blindSide,
     };
   }
 
@@ -127,6 +139,7 @@ export function buildRound(index: number, random: () => number = Math.random): R
     modifiers: pickModifiers(index, modifierCountForRound(index), random),
     rules: baseRules,
     label: labelFor(curveTier, count),
+    blindSide,
   };
 }
 

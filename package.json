@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build:server": "vite build --ssr src/server/main.ts --outDir dist-server",
-    "server": "npm run build:server && node dist-server/main.js"
+    "server": "npm run build:server && node dist-server/main.js",
+    "analyse": "vite build --ssr src/tools/analyse.ts --outDir dist-tools --logLevel warn && node dist-tools/analyse.js",
+    "recordings:pull": "curl -sf https://lighttown-madness-league.fly.dev/health > /dev/null && fly ssh sftp get -R /data/recordings recordings"
   },
   "dependencies": {
     "@dimforge/rapier3d": "^0.21.0",
