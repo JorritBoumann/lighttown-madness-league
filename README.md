@@ -1067,6 +1067,10 @@ The live server records to a Fly volume. To fetch everything recorded so far:
 npm run recordings:pull     # into ./recordings, which git ignores
 ```
 
+A room still open when pulled gives a file that is complete to within a few
+seconds but not yet a finished gzip: `npm run analyse` reads it, plain
+`gunzip` refuses it.
+
 ### The blind side
 
 Each run, the opposition is quietly worse on one side of the pitch -- later
