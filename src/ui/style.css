@@ -355,7 +355,11 @@ html, body {
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
+  /* Centred by the panel's auto margins rather than place-items, which on a
+     screen shorter than the panel centres it off both edges at once and
+     leaves the top unreachable. Auto margins give way to zero instead, and
+     the overflow scrolls. */
+  overflow-y: auto;
   /* Light enough to show the stadium behind it. The panel below carries its
      own opaque background, so readability does not depend on drowning the
      scene — and the first thing anyone sees should be the arena. */
@@ -371,6 +375,7 @@ html, body {
 .menu-screen[hidden] { display: none !important; }
 
 .menu-panel {
+  margin: auto;
   width: min(560px, 88vw);
   padding: 34px 40px 30px;
   border-radius: 12px;
@@ -771,7 +776,7 @@ body.touch * { -webkit-tap-highlight-color: transparent; -webkit-user-select: no
 /* The HUD, moved out of the buttons' way. */
 body.touch .hud-help,
 body.touch .hud-flags,
-body.touch .best-line { display: none; }
+body.touch .run-layer .best-line { display: none; }
 body.touch .hud-boost {
   right: auto;
   left: 50%;
@@ -807,3 +812,35 @@ body.touch .hud-room { top: calc(176px + env(safe-area-inset-top, 0px)); right: 
     z-index: 5;
   }
 }
+
+/* A short screen: a phone on its side is 375 pixels tall, and the title
+   panel was 480, with the last two items below the edge. Tighter, and the
+   items side by side, which is the direction a landscape screen has room in. */
+@media (max-height: 500px) {
+  .menu-panel {
+    width: min(720px, 94vw);
+    padding: 16px 24px 14px;
+    margin: auto max(16px, env(safe-area-inset-right, 0px));
+  }
+  .menu-title { font-size: 26px; }
+  .menu-subtitle { font-size: 10px; }
+  .menu-body { margin-top: 10px; line-height: 1.5; font-size: 12px; }
+  .menu-list {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
+  }
+  .menu-list li { margin: 0; padding: 7px 10px; }
+  .menu-footer { margin-top: 10px; }
+}
+
+/* Key hints mean nothing to a finger, and a pad cannot be plugged into a
+   phone in any way the page would hear about. */
+body.touch .menu-footer,
+body.touch .pad-row { display: none; }
+
+/* The thumb controls step aside while an upgrade is being chosen: the third
+   card reaches under the Jump button on a phone, and there is nothing to
+   drive until a card is picked. */
+#ui:has(.upgrade-picker:not([hidden])) .touch-layer { display: none; }

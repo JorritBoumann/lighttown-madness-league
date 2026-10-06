@@ -9,6 +9,7 @@ import { BoostPads } from './physics/boostPads';
 import { Simulation, type SimCar } from './sim/simulation';
 import { NetClient } from './net/client';
 import { TouchSource } from './input/touch';
+import { takeScreen } from './ui/fullscreen';
 import { MODIFIERS } from './state/modifiers';
 import { BOSSES } from './state/bosses';
 import { UPGRADES } from './state/upgrades';
@@ -89,6 +90,9 @@ const TRAIL_COLOUR_ORANGE = new THREE.Color(0xff8a50);
 
 /** How long the upgrade picker ignores keys and buttons after it opens. */
 const PICKER_GRACE_MS = 600;
+
+/** Menu items that put the player on the pitch, where a phone goes fullscreen. */
+const PLAY_ITEMS = new Set(['start', 'again', 'freeplay', 'resume', 'restart']);
 
 /** A server URL without its query, for showing to a person. */
 function serverLabel(url: string): string {
@@ -188,6 +192,7 @@ export class Game {
   private readonly ballInterp: TransformInterpolator;
 
   private readonly controls: Controls;
+  private readonly touch: TouchSource;
   private readonly hud: Hud;
   private readonly radar: Radar;
   private readonly matchHud: MatchHud;
@@ -266,7 +271,8 @@ export class Game {
     this.addCar(0, 0, null);
 
     this.controls = new Controls();
-    this.controls.attachTouch(new TouchSource(ui));
+    this.touch = new TouchSource(ui);
+    this.controls.attachTouch(this.touch);
     this.hud = new Hud(ui);
     this.radar = new Radar(ui);
     this.matchHud = new MatchHud(ui);
@@ -280,6 +286,8 @@ export class Game {
       // heard anything.
       this.sound.unlock();
       this.sound.menuSelect();
+      // Also a gesture, which fullscreen needs as much as audio does.
+      if (this.touch.active && PLAY_ITEMS.has(id)) takeScreen();
       this.choose(id);
     };
     this.shell.onlineAvailable = configuredServer() !== null;

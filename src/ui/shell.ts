@@ -47,7 +47,7 @@ export class Shell {
       : '<dt>Best run</dt><dd>none yet</dd>';
     // Pads are invisible to the page until one is touched, so say which it is
     // rather than leaving someone holding a pad to wonder.
-    const padRow = `<dt>Controller</dt><dd>${
+    const padRow = `<dt class="pad-row">Controller</dt><dd class="pad-row">${
       padConnected ? 'connected' : 'press any button to connect'
     }</dd>`;
     this.menu.show({
