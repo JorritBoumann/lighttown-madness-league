@@ -11,7 +11,7 @@ import { tally, type Upgrade } from '../state/upgrades';
  * itself, so the game keeps a single place where screens change.
  */
 
-export type Screen = 'title' | 'playing' | 'paused' | 'summary';
+export type Screen = 'title' | 'online' | 'playing' | 'paused' | 'summary';
 
 export class Shell {
   private readonly menu: MenuScreen;
@@ -43,14 +43,94 @@ export class Shell {
       items: [
         { id: 'start', label: 'Start run', hint: 'Round one. Escalates from there.' },
         { id: 'freeplay', label: 'Free play', hint: 'No clock, no opponents. Get a feel for the car.' },
+        { id: 'online', label: 'Play online', hint: 'Make a room, or join one with a code.' },
         { id: 'mute', label: muted ? 'Sound: off' : 'Sound: on' },
+      ],
+      footer: 'Arrows or 1-4 to choose · Enter to select',
+    });
+  }
+
+  showOnline(): void {
+    this.screen = 'online';
+    this.menu.show({
+      title: 'Play online',
+      subtitle: 'A shared run against the bots, with up to two of you in a room.',
+      items: [
+        { id: 'create', label: 'Make a room', hint: 'You get a code to send to a friend.' },
+        { id: 'joinroom', label: 'Join a room', hint: 'Type the code someone sent you.' },
+        { id: 'back', label: 'Back' },
       ],
       footer: 'Arrows or 1-3 to choose · Enter to select',
     });
   }
 
-  showPause(roundLabel: string, muted: boolean): void {
+  /**
+   * The code box.
+   *
+   * Enter and Escape are handled by the box itself rather than by the menu: the
+   * keyboard deliberately ignores keys aimed at a text field, so the menu never
+   * hears them while you are typing. The error goes in the subtitle, which is
+   * set as text -- it can echo what was typed, and what was typed is not ours.
+   */
+  showJoin(onSubmit: (code: string) => void, onCancel: () => void, error?: string): void {
+    this.screen = 'online';
+    this.menu.show({
+      title: 'Join a room',
+      subtitle: error ?? 'Four letters and digits.',
+      bodyHtml:
+        '<input class="room-input" maxlength="6" autocomplete="off" autocapitalize="characters" ' +
+        'spellcheck="false" aria-label="Room code" placeholder="ABCD">',
+      items: [],
+      footer: 'Enter to join · Esc to go back',
+    });
+    const input = this.menu.body.querySelector('input');
+    if (!input) return;
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onSubmit(input.value);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        onCancel();
+      }
+    });
+    // After the menu has drawn, or the focus lands on nothing.
+    requestAnimationFrame(() => input.focus());
+  }
+
+  /** A message with a single way out, for refusals and dropped connections. */
+  showMessage(title: string, message: string, action = { id: 'leave', label: 'Back to title' }): void {
+    this.screen = 'online';
+    this.menu.show({
+      title,
+      subtitle: message,
+      items: [action],
+      footer: 'Enter to continue',
+    });
+  }
+
+  /** While a connection is being made: nothing to choose yet. */
+  showConnecting(where: string): void {
+    this.screen = 'online';
+    this.menu.show({ title: 'Connecting', subtitle: where, items: [] });
+  }
+
+  showPause(roundLabel: string, muted: boolean, room: string | null = null): void {
     this.screen = 'paused';
+    // Online, the match does not stop because one person opened a menu, and
+    // restarting the run is not one person's call -- so neither is offered.
+    if (room) {
+      this.menu.show({
+        title: 'Menu',
+        subtitle: `${roundLabel} · room ${room} · the match carries on`,
+        items: [
+          { id: 'resume', label: 'Back to the match' },
+          { id: 'mute', label: muted ? 'Sound: off' : 'Sound: on' },
+          { id: 'leave', label: 'Leave room' },
+        ],
+      });
+      return;
+    }
     this.menu.show({
       title: 'Paused',
       subtitle: roundLabel,

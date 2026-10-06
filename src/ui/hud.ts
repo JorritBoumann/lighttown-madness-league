@@ -79,6 +79,22 @@ export class Hud {
     this.setFlag('ballcam', ballCam);
   }
 
+  /**
+   * The room code, kept on screen while playing online.
+   *
+   * It is the thing you read out to someone who wants to join, and asking them
+   * to dig through a menu for it mid-match is asking them not to bother.
+   */
+  showRoom(code: string): void {
+    let chip = this.root.querySelector<HTMLElement>('.hud-room');
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.className = 'hud-room';
+      this.root.appendChild(chip);
+    }
+    chip.textContent = `Room ${code}`;
+  }
+
   private setFlag(name: string, on: boolean): void {
     this.flags[name]?.classList.toggle('on', on);
   }

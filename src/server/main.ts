@@ -1,7 +1,9 @@
 import { WebSocketServer, type WebSocket } from 'ws';
 import { initPhysics } from '../physics/world';
-import { GameServer, SNAPSHOT_HZ } from './gameServer';
-import { decodeClient, encode } from './protocol';
+import { SNAPSHOT_HZ } from './gameServer';
+import { RoomRegistry, type Room } from './rooms';
+import { CLOSE, decodeClient, encode, type ServerMessage } from './protocol';
+import { cfg } from '../config';
 
 /**
  * The server.
@@ -21,30 +23,76 @@ import { decodeClient, encode } from './protocol';
 const PORT = Number(process.env.PORT ?? 8080);
 const BOTS = Number(process.env.BOTS ?? 1);
 const SEATS = Number(process.env.SEATS ?? 2);
-/** Never try to make up more than this in one wake-up. */
-const MAX_CATCHUP_STEPS = 12;
+const MAX_ROOMS = Number(process.env.MAX_ROOMS ?? 32);
+/** Seconds an empty room is kept, so a dropped connection can come back to it. */
+const IDLE_SECONDS = Number(process.env.IDLE_SECONDS ?? 60);
+/**
+ * The most simulated time made up in one wake-up, in seconds.
+ *
+ * In time rather than steps, and a quarter of a second rather than a tenth. A
+ * step costs about a tenth of a millisecond per room, so catching up thirty of
+ * them is three milliseconds of work: cheap, and far better than the
+ * alternative, which is the match quietly running slower than real time and
+ * every client correcting for it. The cap still exists for what it was for --
+ * a stall long enough that catching up would itself stall -- it was just set
+ * as if steps were expensive.
+ */
+const MAX_CATCHUP_SECONDS = 0.25;
 
 async function main(): Promise<void> {
   await initPhysics();
 
-  const game = new GameServer({ botOpponents: BOTS, maxClients: SEATS });
-  const sockets = new Map<number, WebSocket>();
+  const registry = new RoomRegistry({
+    room: { botOpponents: BOTS, maxClients: SEATS },
+    maxRooms: MAX_ROOMS,
+    idleTimeout: IDLE_SECONDS,
+  });
+  // Client ids are only unique within a room, so sockets are filed per room.
+  const sockets = new Map<string, Map<number, WebSocket>>();
   const wss = new WebSocketServer({ port: PORT });
 
-  wss.on('connection', (socket) => {
+  wss.on('connection', (socket, request) => {
+    // The room comes in on the URL: `?room=ABCD` to join, `?room=new` or
+    // nothing to start one. On the URL rather than in a first message, so a
+    // refusal happens before anything is set up for a connection that is not
+    // going to stay.
+    const asked = new URL(request.url ?? '/', 'http://server').searchParams.get('room');
+    let room: Room | null;
+    if (!asked || asked.toLowerCase() === 'new') {
+      room = registry.create();
+      if (!room) {
+        socket.close(CLOSE.SERVER_FULL, 'server full');
+        return;
+      }
+      log(`room ${room.code} opened (${registry.size} live)`);
+    } else {
+      room = registry.get(asked);
+      if (!room) {
+        socket.close(CLOSE.NO_SUCH_ROOM, 'no such room');
+        return;
+      }
+    }
+
+    const game = room.game;
     const joined = game.join();
     if (!joined) {
-      socket.close(1013, 'server full');
+      socket.close(CLOSE.ROOM_FULL, 'room full');
       return;
     }
+    const code = room.code;
     const { handle, welcome } = joined;
-    sockets.set(handle.id, socket);
+    let roomSockets = sockets.get(code);
+    if (!roomSockets) {
+      roomSockets = new Map();
+      sockets.set(code, roomSockets);
+    }
+    roomSockets.set(handle.id, socket);
     socket.send(encode(welcome));
     // A client joining mid-run needs the round it is joining, not the next one.
     const round = game.currentRound();
     if (round) socket.send(encode(round));
     socket.send(encode(game.runState()));
-    log(`client ${handle.id} joined as car ${handle.carIndex} (${game.clientCount}/${SEATS})`);
+    log(`room ${code}: client ${handle.id} joined as car ${handle.carIndex} (${game.clientCount}/${SEATS})`);
 
     socket.on('message', (data) => {
       const message = decodeClient(String(data));
@@ -54,19 +102,31 @@ async function main(): Promise<void> {
     });
 
     const drop = (): void => {
-      if (!sockets.delete(handle.id)) return;
+      if (!roomSockets.delete(handle.id)) return;
       game.leave(handle.id);
-      log(`client ${handle.id} left (${game.clientCount}/${SEATS})`);
+      log(`room ${code}: client ${handle.id} left (${game.clientCount}/${SEATS})`);
     };
     socket.on('close', drop);
     socket.on('error', drop);
   });
 
-  const step = game.stepSeconds * 1000;
+  const stepSeconds = cfg.physics.fixedDt;
+  const step = stepSeconds * 1000;
   const snapshotEvery = 1000 / SNAPSHOT_HZ;
   let last = performance.now();
   let accumulator = 0;
   let sinceSnapshot = 0;
+  const health = { window: 0, drops: 0, droppedMs: 0, worstGap: 0 };
+
+  /** Sends to everyone in one room. */
+  const broadcast = (code: string, messages: (ServerMessage | null)[]): void => {
+    const roomSockets = sockets.get(code);
+    if (!roomSockets) return;
+    for (const socket of roomSockets.values()) {
+      if (socket.readyState !== socket.OPEN) continue;
+      for (const message of messages) if (message) socket.send(encode(message));
+    }
+  };
 
   const tick = (): void => {
     const now = performance.now();
@@ -75,55 +135,79 @@ async function main(): Promise<void> {
     sinceSnapshot += elapsed;
     last = now;
 
+    const rooms = registry.all();
+    health.worstGap = Math.max(health.worstGap, elapsed);
+    const maxSteps = Math.ceil((MAX_CATCHUP_SECONDS * 1000) / step);
     let steps = 0;
-    while (accumulator >= step && steps < MAX_CATCHUP_STEPS) {
-      game.step();
+    while (accumulator >= step && steps < maxSteps) {
+      for (const room of rooms) room.game.step();
       accumulator -= step;
       steps++;
     }
-    if (steps === MAX_CATCHUP_STEPS) {
-      // Behind by more than we will ever make up. Drop the debt rather than
-      // carrying it, or every later frame pays for one bad one.
+    if (steps === maxSteps && accumulator >= step) {
+      // Behind by more than is worth making up. Drop the debt rather than
+      // carrying it, or every later wake-up pays for one bad one -- but count
+      // it, because every millisecond dropped is a millisecond the match ran
+      // slow, and that is worth knowing about rather than guessing at.
+      health.droppedMs += accumulator;
+      health.drops++;
       accumulator = 0;
-      log('fell behind; dropped the backlog');
     }
 
-    // Round and run changes go out the moment they happen rather than waiting
-    // for the snapshot tick: a round change rebuilds the client's arena, and
-    // doing that a frame late means a frame simulated against the wrong one.
-    // Goal and kickoff go out before the round and the run, because that is the
-    // order they happen in: a goal is celebrated, then everyone is reset, then
-    // the round and the run reflect it. Sent out of order, a client would clear
-    // its trails for the kickoff and then start a celebration on top of it.
-    const goal = game.takeGoalMessage();
-    const kickoff = game.takeKickoffMessage();
-    const roundChange = game.takeRoundMessage();
-    const runChange = game.takeRunMessage();
-    if (goal || kickoff || roundChange || runChange) {
-      for (const id of game.clientIds()) {
-        const socket = sockets.get(id);
-        if (!socket || socket.readyState !== socket.OPEN) continue;
-        if (goal) socket.send(encode(goal));
-        if (kickoff) socket.send(encode(kickoff));
-        if (roundChange) socket.send(encode(roundChange));
-        if (runChange) socket.send(encode(runChange));
+    // One line every ten seconds, and only when something went wrong. A line
+    // per event told you it happened but not how badly, and it happened often
+    // enough to bury everything else in the log.
+    health.window += elapsed;
+    if (health.window >= 10_000) {
+      if (health.drops > 0) {
+        log(
+          `fell behind ${health.drops}x in 10s: dropped ${health.droppedMs.toFixed(0)}ms of ` +
+            `simulation, worst gap between wake-ups ${health.worstGap.toFixed(0)}ms ` +
+            `(${registry.size} room${registry.size === 1 ? '' : 's'})`,
+        );
       }
+      health.window = 0;
+      health.drops = 0;
+      health.droppedMs = 0;
+      health.worstGap = 0;
+    }
+
+    for (const room of rooms) {
+      // Goal and kickoff before round and run, because that is the order they
+      // happen in: a goal is celebrated, then everyone is reset, then the round
+      // and the run reflect it. Out of order, a client would clear its trails
+      // for the kickoff and then start a celebration on top of it.
+      const game = room.game;
+      broadcast(room.code, [
+        game.takeGoalMessage(),
+        game.takeKickoffMessage(),
+        game.takeRoundMessage(),
+        game.takeRunMessage(),
+      ]);
     }
 
     if (sinceSnapshot >= snapshotEvery) {
       // Subtracted rather than zeroed, so the send rate does not drift slower
       // than it should every time a wake-up lands late.
       sinceSnapshot %= snapshotEvery;
-      for (const id of game.clientIds()) {
-        const socket = sockets.get(id);
-        if (!socket || socket.readyState !== socket.OPEN) continue;
-        socket.send(encode(game.snapshotFor(id)));
+      for (const room of rooms) {
+        const roomSockets = sockets.get(room.code);
+        if (!roomSockets) continue;
+        for (const [id, socket] of roomSockets) {
+          if (socket.readyState !== socket.OPEN) continue;
+          socket.send(encode(room.game.snapshotFor(id)));
+        }
       }
+    }
+
+    for (const code of registry.sweep(elapsed / 1000)) {
+      sockets.delete(code);
+      log(`room ${code} closed after ${IDLE_SECONDS}s empty (${registry.size} live)`);
     }
   };
 
   const timer = setInterval(tick, step);
-  log(`listening on ws://localhost:${PORT} — ${SEATS} seats, ${BOTS} bot(s)`);
+  log(`listening on ws://localhost:${PORT} — rooms of ${SEATS} seats, ${BOTS} bot(s), at most ${MAX_ROOMS}`);
 
   const shutdown = (): void => {
     clearInterval(timer);

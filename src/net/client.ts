@@ -81,12 +81,18 @@ export class NetClient {
   onRound: ((round: RoundMessage) => void) | null = null;
   /** Fired when the run's state changes, so the client can mirror it. */
   onRun: ((run: RunMessage) => void) | null = null;
+  /** The room this client is in, once the server has said. */
+  room: string | null = null;
+  /** The server turned the connection away, with its reason as a close code. */
+  onRefused: ((code: number) => void) | null = null;
+  /** The connection went after the match had started. */
+  onDropped: (() => void) | null = null;
   /** Fired the moment the server counts a goal, and when it resets a kickoff. */
   onGoal: ((goal: GoalMessage) => void) | null = null;
   onKickoff: (() => void) | null = null;
   private connected = false;
 
-  constructor(private readonly url: string) {}
+  constructor(readonly url: string) {}
 
   get isConnected(): boolean {
     return this.connected && this.carIndex !== null;
@@ -98,9 +104,15 @@ export class NetClient {
     socket.onopen = () => {
       this.connected = true;
     };
-    socket.onclose = () => {
+    socket.onclose = (event: CloseEvent) => {
+      const wasIn = this.carIndex !== null;
       this.connected = false;
       this.carIndex = null;
+      // Refused and dropped are different things to tell a person. A refusal
+      // comes before any welcome and carries a reason the server chose; a drop
+      // comes after one, mid-match, and usually means the network.
+      if (wasIn) this.onDropped?.();
+      else this.onRefused?.(event.code);
     };
     socket.onmessage = (event: MessageEvent) => {
       const message = decodeServer(String(event.data));
@@ -136,6 +148,7 @@ export class NetClient {
   ingest(message: ServerMessage, onReady?: () => void): void {
     if (message.type === 'welcome') {
       this.carIndex = message.carIndex;
+      this.room = message.room;
       onReady?.();
       return;
     }

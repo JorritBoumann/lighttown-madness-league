@@ -8,8 +8,17 @@ try {
   // `?server=ws://host:port` joins a match instead of playing solo. One game
   // either way: the difference is who owns the run, and nothing the player
   // looks at knows which it is.
-  const server = new URLSearchParams(location.search).get('server') ?? undefined;
-  const game = await Game.create(canvas, ui, server);
+  const params = new URLSearchParams(location.search);
+  const server = params.get('server');
+  // The room rides on the socket URL, which is where the server reads it. No
+  // room at all means "make me one", the same as asking for `new`.
+  let url: string | undefined;
+  if (server) {
+    const socket = new URL(server);
+    socket.searchParams.set('room', params.get('room') ?? 'new');
+    url = socket.toString();
+  }
+  const game = await Game.create(canvas, ui, url);
   game.start();
   boot?.classList.add('gone');
 

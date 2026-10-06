@@ -484,7 +484,11 @@ describe('striking the ball', () => {
       return scored;
     };
     expect(convert(5)).toBeGreaterThan(convert(1) + 2);
-  });
+    // Thirty-two scenarios of up to twelve seconds at 120Hz is around forty-six
+    // thousand physics steps, which runs past vitest's five-second default on a
+    // busy machine. The same failure as the aerial test had: a timeout, not a
+    // wrong answer, so it gets a real limit rather than fewer scenarios.
+  }, 30_000);
 });
 
 describe('roles', () => {

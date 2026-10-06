@@ -49,6 +49,11 @@ export class MenuScreen {
     return !this.root.hidden;
   }
 
+  /** The detail block, for screens that put a control in it. */
+  get body(): HTMLElement {
+    return this.bodyEl;
+  }
+
   /** Currently highlighted item, or null if there are none. */
   get selected(): MenuItem | null {
     return this.items[this.index] ?? null;

@@ -24,6 +24,11 @@ export class Keyboard {
 
   private onDown = (e: KeyboardEvent): void => {
     if (e.repeat) return;
+    // Someone typing into a field is not driving. Without this the room-code
+    // box could not take a 2, a 3, a Q or an E -- all valid code characters --
+    // because those keys are swallowed below, and every letter typed would also
+    // fire as a hotkey: M mutes, T toggles ball cam, a digit picks a menu item.
+    if (isTyping(e.target)) return;
     const code = e.code;
     this.down.add(code);
     this.pressedThisFrame.add(code);
@@ -86,6 +91,13 @@ export class Keyboard {
     this.target.removeEventListener('keyup', this.onUp);
     this.target.removeEventListener('blur', this.onBlur);
   }
+}
+
+/** True when a key is going into a text field rather than to the game. */
+function isTyping(target: EventTarget | null): boolean {
+  if (!target || typeof (target as Element).closest !== 'function') return false;
+  const el = target as HTMLElement;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true;
 }
 
 const SWALLOW = new Set([

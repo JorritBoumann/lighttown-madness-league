@@ -1095,11 +1095,15 @@ The simulation runs headlessly, so it can be the authority for a networked
 match rather than something each browser guesses at.
 
 ```bash
-npm run server          # ws://localhost:8080, 2 seats, 1 bot
-PORT=9000 SEATS=4 BOTS=0 npm run server
+npm run server          # ws://localhost:8080: rooms of 2 seats, 1 bot, at most 32
+PORT=9000 SEATS=4 BOTS=0 MAX_ROOMS=8 IDLE_SECONDS=120 npm run server
 ```
 
-Then point the game at it:
+In the game, **Play online** makes a room and gives you a four-character code
+to send someone, or joins the room their code names. The address bar becomes
+the invitation once you are in, so sending the link works as well as the code.
+
+Or point the game at it directly:
 
 ```
 http://127.0.0.1:5173/?server=ws://localhost:8080

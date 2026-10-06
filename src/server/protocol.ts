@@ -12,6 +12,8 @@ import type { MatchRules } from '../state/match';
 /** Server's reply to a connection, before any state arrives. */
 export interface WelcomeMessage {
   type: 'welcome';
+  /** The room joined, so a client that asked for a new one learns its code. */
+  room: string;
   /** Which car in the snapshot is this client's. */
   carIndex: number;
   /** Fixed step the server runs at, so a client can predict at the same rate. */
@@ -162,6 +164,19 @@ export interface InputMessage {
 }
 
 export type ClientMessage = InputMessage | ChooseMessage;
+
+/**
+ * Why a connection was refused, as WebSocket close codes.
+ *
+ * In the 4000 range, which the WebSocket spec reserves for applications, so a
+ * client can tell "that room does not exist" from "the network fell over" and
+ * say the right thing — a typo and an outage need different advice.
+ */
+export const CLOSE = {
+  NO_SUCH_ROOM: 4004,
+  ROOM_FULL: 4009,
+  SERVER_FULL: 4013,
+} as const;
 
 export function encode(message: ServerMessage | ClientMessage): string {
   return JSON.stringify(message);

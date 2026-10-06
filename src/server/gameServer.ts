@@ -38,6 +38,8 @@ export interface ClientHandle {
 }
 
 export interface ServerOptions {
+  /** The room code this match is reached by, echoed in every welcome. */
+  code?: string;
   /** Opponent bots to fill the pitch with. 0 for a purely human match. */
   botOpponents?: number;
   /** How many human players to make room for. */
@@ -305,6 +307,7 @@ export class GameServer {
       handle,
       welcome: {
         type: 'welcome',
+        room: this.options.code ?? '',
         carIndex,
         stepSeconds: this.stepSeconds,
         snapshotHz: SNAPSHOT_HZ,
@@ -362,6 +365,11 @@ export class GameServer {
       score: [...this.sim.match.score] as [number, number],
       phase: this.sim.match.phase,
     };
+  }
+
+  /** Frees the simulation. The server must not be used afterwards. */
+  dispose(): void {
+    this.sim.dispose();
   }
 
   clientIds(): number[] {

@@ -616,3 +616,38 @@ html, body {
   backdrop-filter: blur(2px);
 }
 .hud-radar canvas { display: block; width: 100%; height: 100%; }
+
+/* Top right, under the best-run line: out of the way of play, and where you
+   look when someone asks "what's the code?". */
+.hud-room {
+  position: absolute;
+  right: 28px;
+  top: 52px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  background: rgba(8, 12, 20, 0.55);
+  border: 1px solid rgba(190, 215, 245, 0.18);
+}
+
+/* The code box. Wide letter-spacing because a code is read character by
+   character, and big because it is typed on phones as often as keyboards. */
+.room-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0 4px;
+  padding: 12px 14px;
+  font: 650 28px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.4em;
+  text-align: center;
+  text-transform: uppercase;
+  color: #eef4ff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(190, 215, 245, 0.3);
+  border-radius: 8px;
+  outline: none;
+}
+.room-input:focus { border-color: rgba(120, 190, 255, 0.8); }

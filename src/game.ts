@@ -11,7 +11,8 @@ import { NetClient } from './net/client';
 import { MODIFIERS } from './state/modifiers';
 import { BOSSES } from './state/bosses';
 import { UPGRADES } from './state/upgrades';
-import type { RoundMessage, RunMessage } from './server/protocol';
+import { CLOSE, type RoundMessage, type RunMessage } from './server/protocol';
+import { normaliseCode } from './server/roomCode';
 import type { MatchPhase } from './state/match';
 import { Controls } from './input/controls';
 import { emptyInput, type CarInput } from './input/types';
@@ -83,6 +84,23 @@ const GOAL_COLOUR_BLUE = new THREE.Color(0x7fd4ff);
 const GOAL_COLOUR_ORANGE = new THREE.Color(0xffa070);
 const TRAIL_COLOUR_BLUE = new THREE.Color(0xffc14d);
 const TRAIL_COLOUR_ORANGE = new THREE.Color(0xff8a50);
+
+/**
+ * Where to look for a server when the page was not told.
+ *
+ * The page's own host on 8080, which is where `npm run server` listens, over
+ * `wss` when the page itself is on https -- a browser will not open a plain
+ * socket from a secure page.
+ */
+function defaultServer(): string {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${location.hostname || 'localhost'}:8080`;
+}
+
+/** A server URL without its query, for showing to a person. */
+function serverLabel(url: string): string {
+  return url.split('?')[0] ?? url;
+}
 
 export class Game {
   /**
@@ -352,6 +370,15 @@ export class Game {
         decisive: false,
       });
     net.onKickoff = () => this.setUpKickoff();
+    net.onRefused = (code) => this.onRefused(code);
+    net.onDropped = () =>
+      this.shell.showMessage(
+        'Connection lost',
+        'The server stopped answering. The room is kept for a minute if you go back in.',
+      );
+
+    this.screen = 'online';
+    this.shell.showConnecting(serverLabel(url));
     net.connect(() => {
       // Straight into play: a server decides when a round starts, so there is
       // nothing for a title screen to offer.
@@ -359,7 +386,59 @@ export class Game {
       this.freePlay = false;
       this.shell.hide();
       this.syncHudVisibility();
+
+      const room = net.room;
+      if (room) {
+        // The address bar becomes the invitation. It also has to stop saying
+        // `room=new`, or reloading the page would open a second room rather
+        // than going back into this one.
+        const params = new URLSearchParams(location.search);
+        params.set('room', room);
+        history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
+        this.hud.showRoom(room);
+      }
     });
+  }
+
+  /** Says why the server turned us away, in terms of what to do about it. */
+  private onRefused(code: number): void {
+    const asked = new URLSearchParams(location.search).get('room') ?? '';
+    if (code === CLOSE.NO_SUCH_ROOM) {
+      this.shell.showMessage(
+        'No such room',
+        `Nothing is running under "${asked.toUpperCase()}". Rooms close a minute after everyone leaves.`,
+      );
+    } else if (code === CLOSE.ROOM_FULL) {
+      this.shell.showMessage('Room full', 'Both seats in that room are taken.');
+    } else if (code === CLOSE.SERVER_FULL) {
+      this.shell.showMessage('Server busy', 'There is no space for another room right now. Try again shortly.');
+    } else {
+      this.shell.showMessage(
+        'Could not connect',
+        `Nothing answered at ${serverLabel(this.net?.url ?? '')}. Is the server running?`,
+      );
+    }
+  }
+
+  /**
+   * Goes online by reloading into it.
+   *
+   * A page load rather than a switch in place: joined and solo differ in who
+   * owns the run, the config, the car count and the arena, and unwinding all of
+   * that live is a lot of code to get exactly right for no gain. The load also
+   * leaves a URL in the address bar that is the invitation.
+   */
+  private goOnline(room: string): void {
+    const params = new URLSearchParams(location.search);
+    params.set('server', params.get('server') ?? defaultServer());
+    params.set('room', room);
+    location.search = params.toString();
+  }
+
+  /** Back to solo, the same way. */
+  private leaveOnline(): void {
+    this.net?.disconnect();
+    location.href = location.pathname;
   }
 
   /** The server's round: its tuning, its arena, its label. */
@@ -948,13 +1027,32 @@ export class Game {
       case 'quit':
         this.toTitle();
         return;
+      case 'online':
+        this.screen = 'online';
+        this.shell.showOnline();
+        return;
+      case 'create':
+        this.goOnline('new');
+        return;
+      case 'joinroom':
+        this.askForCode();
+        return;
+      case 'back':
+        this.screen = 'title';
+        this.shell.showTitle(this.run.best, this.sound.muted, this.controls.padConnected);
+        return;
+      case 'leave':
+        this.leaveOnline();
+        return;
       case 'mute': {
         const muted = this.sound.toggleMute();
         // Redraw the screen so the label matches.
         if (this.screen === 'title') {
           this.shell.showTitle(this.run.best, muted, this.controls.padConnected);
         }
-        else if (this.screen === 'paused') this.shell.showPause(this.roundLabel, muted);
+        else if (this.screen === 'paused') {
+          this.shell.showPause(this.roundLabel, muted, this.net?.room ?? null);
+        }
         return;
       }
     }
@@ -1001,11 +1099,27 @@ export class Game {
     this.syncHudVisibility();
   }
 
+  /** The code box, and what to say when what was typed cannot be a code. */
+  private askForCode(error?: string): void {
+    this.shell.showJoin(
+      (typed) => {
+        const code = normaliseCode(typed);
+        if (!code) {
+          this.askForCode('That is not a code: four letters and digits, no 0, O, 1, I or L.');
+          return;
+        }
+        this.goOnline(code);
+      },
+      () => this.shell.showOnline(),
+      error,
+    );
+  }
+
   private pause(): void {
     if (this.screen !== 'playing') return;
     this.screen = 'paused';
     this.sound.setBoost(0);
-    this.shell.showPause(this.roundLabel, this.sound.muted);
+    this.shell.showPause(this.roundLabel, this.sound.muted, this.net?.room ?? null);
     this.syncHudVisibility();
   }
 

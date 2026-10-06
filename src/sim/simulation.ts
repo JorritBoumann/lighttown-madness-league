@@ -175,6 +175,17 @@ export class Simulation {
     this.pads.resetAll();
   }
 
+  /**
+   * Releases the physics world.
+   *
+   * Rapier's world lives in WebAssembly memory, which the garbage collector
+   * cannot see. A server that drops a finished room without this leaks a whole
+   * world per game played, and nothing in JavaScript will ever reclaim it.
+   */
+  dispose(): void {
+    this.phys.free();
+  }
+
   /** Re-reads tuning that a round modifier or an upgrade may have changed. */
   syncConfig(): void {
     this.ball.syncConfig();
