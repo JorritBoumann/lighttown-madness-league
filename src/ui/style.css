@@ -676,3 +676,6 @@ html, body {
   transform: none;
 }
 .upgrade-picker.locked .picker-option:hover { border-color: rgba(255, 255, 255, 0.14); }
+
+/* Menu items are clickable as well as keyable. */
+.menu-list li { cursor: pointer; }

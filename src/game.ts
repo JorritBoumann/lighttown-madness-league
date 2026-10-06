@@ -272,6 +272,14 @@ export class Game {
     this.runHud.onPick = (index) => this.takeUpgrade(index);
     this.replayHud = new ReplayHud(ui);
     this.shell = new Shell(ui);
+    this.shell.onChoose = (id) => {
+      // A click is a user gesture, which is what an AudioContext needs. Only a
+      // key press unlocked it before, so someone who only used the mouse never
+      // heard anything.
+      this.sound.unlock();
+      this.sound.menuSelect();
+      this.choose(id);
+    };
     this.shell.onlineAvailable = configuredServer() !== null;
     this.panel = new TweakPanel(ui);
     this.panel.onChange(() => this.syncConfig());

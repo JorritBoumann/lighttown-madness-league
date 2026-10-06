@@ -19,8 +19,20 @@ export class Shell {
   /** Whether "Play online" goes anywhere. False on a host with no server. */
   onlineAvailable = false;
 
+  /** Called with an item's id when one is clicked or tapped. */
+  onChoose: ((id: string) => void) | null = null;
+  /** The code box's callbacks while it is open, for its clickable buttons. */
+  private joinActions: { submit: () => void; cancel: () => void } | null = null;
+
   constructor(parent: HTMLElement) {
     this.menu = new MenuScreen(parent);
+    this.menu.onChoose = (id) => {
+      // The code box's own buttons act on the box; everything else is the
+      // game's to decide, as with the keys.
+      if (id === 'join-submit') this.joinActions?.submit();
+      else if (id === 'join-back') this.joinActions?.cancel();
+      else this.onChoose?.(id);
+    };
   }
 
   get visible(): boolean {
@@ -50,7 +62,7 @@ export class Shell {
           : []),
         { id: 'mute', label: muted ? 'Sound: off' : 'Sound: on' },
       ],
-      footer: `Arrows or 1-${this.onlineAvailable ? 4 : 3} to choose · Enter to select`,
+      footer: `Click, or arrows or 1-${this.onlineAvailable ? 4 : 3} and Enter`,
     });
   }
 
@@ -84,11 +96,17 @@ export class Shell {
       bodyHtml:
         '<input class="room-input" maxlength="6" autocomplete="off" autocapitalize="characters" ' +
         'spellcheck="false" aria-label="Room code" placeholder="ABCD">',
-      items: [],
+      // Buttons as well as Enter and Escape, for anyone with a mouse or a
+      // touchscreen -- the box was keyboard-only, with nothing to press.
+      items: [
+        { id: 'join-submit', label: 'Join' },
+        { id: 'join-back', label: 'Back' },
+      ],
       footer: 'Enter to join · Esc to go back',
     });
     const input = this.menu.body.querySelector('input');
     if (!input) return;
+    this.joinActions = { submit: () => onSubmit(input.value), cancel: onCancel };
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();

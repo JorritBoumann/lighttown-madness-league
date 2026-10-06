@@ -23,6 +23,8 @@ export class MenuScreen {
 
   private items: MenuItem[] = [];
   private index = 0;
+  /** Called with an item's id when it is clicked or tapped. */
+  onChoose: ((id: string) => void) | null = null;
 
   constructor(parent: HTMLElement, className = '') {
     this.root = document.createElement('div');
@@ -119,7 +121,28 @@ export class MenuScreen {
         hint.textContent = item.hint;
         li.appendChild(hint);
       }
+      // The pointer, as well as the keys. Every menu here was keyboard-only,
+      // so on a web page someone clicking "Start run" got nothing at all.
+      li.addEventListener('pointerenter', () => this.highlight(i));
+      li.addEventListener('click', () => {
+        this.highlight(i);
+        this.onChoose?.(item.id);
+      });
       this.listEl.appendChild(li);
     }
+  }
+
+  /**
+   * Moves the highlight without rebuilding the list.
+   *
+   * Rebuilding on hover would replace the element under the pointer, which
+   * fires the pointer events again on the new one -- a loop, and a flicker.
+   */
+  private highlight(index: number): void {
+    if (index === this.index) return;
+    this.index = index;
+    this.listEl.querySelectorAll('li').forEach((el, i) => {
+      el.className = i === index ? 'on' : '';
+    });
   }
 }
