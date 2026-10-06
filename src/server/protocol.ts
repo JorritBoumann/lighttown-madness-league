@@ -112,7 +112,41 @@ export interface RunMessage {
   chooser: number | null;
 }
 
-export type ServerMessage = WelcomeMessage | SnapshotMessage | RoundMessage | RunMessage;
+/**
+ * A goal, the moment the server counts one.
+ *
+ * Sent rather than inferred. A client could watch the score change in
+ * snapshots, but it would learn about it up to a snapshot late, would not know
+ * who touched it last, and two clients would start their celebrations at
+ * different moments. The server already knows all of it.
+ */
+export interface GoalMessage {
+  type: 'goal';
+  team: 0 | 1;
+  ownGoal: boolean;
+  score: [number, number];
+  /** Which end it went in, as the goal's own sign. */
+  end: 1 | -1;
+}
+
+/**
+ * Everyone back on their line.
+ *
+ * The client has to be told, rather than reading it off the next snapshot: a
+ * kickoff teleports every car and the ball, and a trail that is not cleared
+ * first draws a streak from where things were to where they now are.
+ */
+export interface KickoffMessage {
+  type: 'kickoff';
+}
+
+export type ServerMessage =
+  | WelcomeMessage
+  | SnapshotMessage
+  | RoundMessage
+  | RunMessage
+  | GoalMessage
+  | KickoffMessage;
 
 /** A client taking one of the offered upgrades. */
 export interface ChooseMessage {
@@ -146,9 +180,8 @@ export function decodeServer(raw: string): ServerMessage | null {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return null;
     const m = parsed as { type?: unknown };
-    if (m.type !== 'welcome' && m.type !== 'snapshot' && m.type !== 'round' && m.type !== 'run') {
-      return null;
-    }
+    const kinds = ['welcome', 'snapshot', 'round', 'run', 'goal', 'kickoff'];
+    if (typeof m.type !== 'string' || !kinds.includes(m.type)) return null;
     return parsed as ServerMessage;
   } catch {
     return null;

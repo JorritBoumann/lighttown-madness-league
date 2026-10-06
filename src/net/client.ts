@@ -4,6 +4,7 @@ import {
   decodeServer,
   encode,
   type BodyState,
+  type GoalMessage,
   type RoundMessage,
   type RunMessage,
   type ServerMessage,
@@ -80,6 +81,9 @@ export class NetClient {
   onRound: ((round: RoundMessage) => void) | null = null;
   /** Fired when the run's state changes, so the client can mirror it. */
   onRun: ((run: RunMessage) => void) | null = null;
+  /** Fired the moment the server counts a goal, and when it resets a kickoff. */
+  onGoal: ((goal: GoalMessage) => void) | null = null;
+  onKickoff: (() => void) | null = null;
   private connected = false;
 
   constructor(private readonly url: string) {}
@@ -143,6 +147,14 @@ export class NetClient {
     if (message.type === 'run') {
       this.run = message;
       this.onRun?.(message);
+      return;
+    }
+    if (message.type === 'goal') {
+      this.onGoal?.(message);
+      return;
+    }
+    if (message.type === 'kickoff') {
+      this.onKickoff?.();
       return;
     }
     this.latest = message;

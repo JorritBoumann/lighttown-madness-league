@@ -341,6 +341,17 @@ export class Game {
     this.net = net;
     net.onRound = (round) => this.applyRemoteRound(round);
     net.onRun = (run) => this.applyRemoteRun(run);
+    // The celebration, the sound and the replay all hang off a goal the server
+    // counted. Left to the local match they never fired at all in a joined
+    // game: that match is not being played here, so it never sees one.
+    net.onGoal = (goal) =>
+      this.onGoal({
+        team: goal.team,
+        ownGoal: goal.ownGoal,
+        score: goal.score,
+        decisive: false,
+      });
+    net.onKickoff = () => this.setUpKickoff();
     net.connect(() => {
       // Straight into play: a server decides when a round starts, so there is
       // nothing for a title screen to offer.
@@ -554,7 +565,12 @@ export class Game {
     const forPlayer = event.team === 0;
     this.sound.goal(forPlayer);
     this.chase.kick(34);
-    this.replayPending = cfg.replay.startAfter;
+    // Solo only. A replay runs about five seconds and the server pauses for
+    // two and a half, so in a joined game it would still be playing back while
+    // everybody else had kicked off again -- and the client is frozen while it
+    // runs, so it would be watching a replay instead of the match. Everything
+    // else about a goal still happens.
+    if (!this.net) this.replayPending = cfg.replay.startAfter;
     this.goalMoment.trigger(
       this.ball.position,
       this.ball.position.x > 0 ? 1 : -1,

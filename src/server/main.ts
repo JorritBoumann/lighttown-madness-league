@@ -91,12 +91,20 @@ async function main(): Promise<void> {
     // Round and run changes go out the moment they happen rather than waiting
     // for the snapshot tick: a round change rebuilds the client's arena, and
     // doing that a frame late means a frame simulated against the wrong one.
+    // Goal and kickoff go out before the round and the run, because that is the
+    // order they happen in: a goal is celebrated, then everyone is reset, then
+    // the round and the run reflect it. Sent out of order, a client would clear
+    // its trails for the kickoff and then start a celebration on top of it.
+    const goal = game.takeGoalMessage();
+    const kickoff = game.takeKickoffMessage();
     const roundChange = game.takeRoundMessage();
     const runChange = game.takeRunMessage();
-    if (roundChange || runChange) {
+    if (goal || kickoff || roundChange || runChange) {
       for (const id of game.clientIds()) {
         const socket = sockets.get(id);
         if (!socket || socket.readyState !== socket.OPEN) continue;
+        if (goal) socket.send(encode(goal));
+        if (kickoff) socket.send(encode(kickoff));
         if (roundChange) socket.send(encode(roundChange));
         if (runChange) socket.send(encode(runChange));
       }

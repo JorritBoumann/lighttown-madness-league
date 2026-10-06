@@ -8,6 +8,8 @@ import type { RoundSpec } from '../state/round';
 import { emptyInput, type CarInput } from '../input/types';
 import type {
   BodyState,
+  GoalMessage,
+  KickoffMessage,
   RoundMessage,
   RunMessage,
   ServerMessage,
@@ -42,6 +44,22 @@ export interface ServerOptions {
   maxClients?: number;
   /** Seeded for reproducibility; defaults to Math.random. */
   random?: () => number;
+  /**
+   * Seconds between a run ending and the next one starting.
+   *
+   * A server that hosts one run and then sits on a finished match forever is
+   * not a server. Long enough to read the result, short enough that nobody
+   * wonders whether it has hung.
+   */
+  restartAfter?: number;
+  /**
+   * Seconds the host gets to pick an upgrade before one is picked for them.
+   *
+   * Somebody has to choose before the next round can start, and a host who
+   * has gone to make a cup of tea would otherwise hold everyone else in the
+   * picker indefinitely.
+   */
+  pickTimeout?: number;
 }
 
 export class GameServer {
@@ -61,7 +79,9 @@ export class GameServer {
   private rebuiltArena = false;
   /** Set when the round changed, so the next broadcast carries it. */
   private pendingRound: RoundMessage | null = null;
-  private runDirty = true;
+  private pendingGoal: GoalMessage | null = null;
+  private pendingKickoff = false;
+  private lastRunJson = '';
 
   constructor(private readonly options: ServerOptions = {}) {
     const random = options.random ?? Math.random;
@@ -77,9 +97,6 @@ export class GameServer {
     this.run = new Run(
       {
         onRoundStart: (spec) => this.applyRound(spec),
-        onRunOver: () => {
-          this.runDirty = true;
-        },
       },
       random,
     );
@@ -119,13 +136,38 @@ export class GameServer {
     this.sim.setOpponents(spec.lineup.slice(0, this.options.botOpponents ?? spec.lineup.length));
     this.sim.syncConfig();
     this.sim.startMatch(spec.rules, {
-      onKickoff: () => this.sim.resetKickoff(),
+      onGoal: (event) => {
+        this.pendingGoal = {
+          type: 'goal',
+          team: event.team,
+          ownGoal: event.ownGoal,
+          score: [event.score[0], event.score[1]],
+          end: this.sim.ball.position.x > 0 ? 1 : -1,
+        };
+      },
+      onKickoff: () => {
+        this.sim.resetKickoff();
+        this.pendingKickoff = true;
+      },
       onEnd: (result) => this.run.finishRound(result, this.sim.match.playedSeconds),
     });
     this.sim.resetKickoff();
 
     this.pendingRound = this.roundMessage(rebuild);
-    this.runDirty = true;
+  }
+
+  /** A goal, once, the step after the server counted it. */
+  takeGoalMessage(): GoalMessage | null {
+    const message = this.pendingGoal;
+    this.pendingGoal = null;
+    return message;
+  }
+
+  /** A kickoff, once. */
+  takeKickoffMessage(): KickoffMessage | null {
+    if (!this.pendingKickoff) return null;
+    this.pendingKickoff = false;
+    return { type: 'kickoff' };
   }
 
   /** The round message, once, for whoever has not had it. */
@@ -158,11 +200,22 @@ export class GameServer {
     };
   }
 
-  /** Run state, when it has changed since it was last asked for. */
+  /**
+   * Run state, when it differs from what was last sent.
+   *
+   * Compared rather than flagged. This used to set a dirty flag from the run's
+   * hooks, and the hook for a round being *cleared* was never wired: the server
+   * moved to `between` with an upgrade on offer and told nobody, so a joined
+   * game sat on an ended match with no picker. The chooser changing when the
+   * host leaves had the same hole. Diffing the state cannot forget a case,
+   * because it does not have to know what the cases are.
+   */
   takeRunMessage(): RunMessage | null {
-    if (!this.runDirty) return null;
-    this.runDirty = false;
-    return this.runState();
+    const message = this.runState();
+    const json = JSON.stringify(message);
+    if (json === this.lastRunJson) return null;
+    this.lastRunJson = json;
+    return message;
   }
 
   runState(): RunMessage {
@@ -191,12 +244,37 @@ export class GameServer {
     return ids[0] ?? null;
   }
 
+  /** Time spent in the current run phase, for the timeouts below. */
+  private phaseClock = 0;
+  private lastPhase: string = '';
+
+  /** Moves the run on when the people who should have moved it have not. */
+  private tendRun(): void {
+    const phase = this.run.phase;
+    if (phase !== this.lastPhase) {
+      this.lastPhase = phase;
+      this.phaseClock = 0;
+    }
+    this.phaseClock += this.stepSeconds;
+
+    if (phase === 'over' && this.phaseClock >= (this.options.restartAfter ?? 6)) {
+      this.run.start();
+    } else if (
+      phase === 'between' &&
+      this.phaseClock >= (this.options.pickTimeout ?? 20) &&
+      this.run.offer.length > 0
+    ) {
+      // The first offer, which is no worse a choice than any other a person
+      // who was not looking would have made.
+      this.run.choose(0);
+    }
+  }
+
   /** Takes an offered upgrade, if this client is the one allowed to. */
   choose(id: number, index: number): void {
     if (id !== this.hostId()) return;
     if (this.run.phase !== 'between') return;
     this.run.choose(index);
-    this.runDirty = true;
   }
 
   get clientCount(): number {
@@ -254,6 +332,7 @@ export class GameServer {
 
   /** One authoritative step. */
   step(): void {
+    this.tendRun();
     for (const handle of this.clients.values()) {
       this.inputs.set(handle.carIndex, handle.pending);
       // Jump is a one-shot: left latched it would fire every step until the

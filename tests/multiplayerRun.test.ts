@@ -136,3 +136,142 @@ describe('rounds advance', () => {
     expect(s.runState().phase).toBe('over');
   });
 });
+
+describe('goals reach the clients', () => {
+  it('reports a goal once, with who it counts for', () => {
+    const s = server();
+    s.join();
+    // Past the countdown first: during it the match holds everyone on their
+    // line and does not look at the ball, so a goal scored then is not one.
+    while (s.sim.match.phase !== 'playing') s.step();
+    // Put the ball through the orange mouth.
+    s.sim.ball.body.setTranslation(
+      { x: cfg.arena.goalLine - 150, y: cfg.ball.radius, z: 0 },
+      true,
+    );
+    s.sim.ball.body.setLinvel({ x: 1500, y: 0, z: 0 }, true);
+    // Clear anything queued by the round starting.
+    s.takeGoalMessage();
+
+    let goals = 0;
+    let seen: { team: number; score: [number, number] } | null = null;
+    for (let i = 0; i < 240; i++) {
+      s.step();
+      const goal = s.takeGoalMessage();
+      if (goal) {
+        goals++;
+        seen = { team: goal.team, score: goal.score };
+      }
+    }
+    expect(goals).toBe(1);
+    expect(seen!.team).toBe(0);
+    expect(seen!.score).toEqual([1, 0]);
+  });
+
+  it('tells clients when everyone is put back on their line', () => {
+    // Without this a client never clears its trails, and a kickoff draws a
+    // streak from wherever each car was to wherever it now is.
+    const s = server();
+    s.join();
+    while (s.sim.match.phase !== 'playing') s.step();
+    s.sim.ball.body.setTranslation(
+      { x: cfg.arena.goalLine - 150, y: cfg.ball.radius, z: 0 },
+      true,
+    );
+    s.sim.ball.body.setLinvel({ x: 1500, y: 0, z: 0 }, true);
+    s.takeKickoffMessage();
+
+    let kickoffs = 0;
+    for (let i = 0; i < 900; i++) {
+      s.step();
+      if (s.takeKickoffMessage()) kickoffs++;
+    }
+    expect(kickoffs).toBeGreaterThanOrEqual(1);
+  });
+
+  it('hands out each event once, not on every step after it', () => {
+    const s = server();
+    s.join();
+    s.takeGoalMessage();
+    s.takeKickoffMessage();
+    expect(s.takeGoalMessage()).toBeNull();
+    expect(s.takeKickoffMessage()).toBeNull();
+  });
+});
+
+describe('run changes are broadcast, not just recorded', () => {
+  /**
+   * The earlier tests read `runState()` directly, which is what the server
+   * *knows*. This checks `takeRunMessage()`, which is what it *says* — and the
+   * two disagreed: a cleared round moved the run to `between` and nothing went
+   * out, so a joined game sat on an ended match with no upgrade picker.
+   */
+  it('announces a cleared round with its offer', () => {
+    const s = server();
+    s.join();
+    s.takeRunMessage(); // the round-one state, already sent
+
+    s.run.finishRound({ winner: 0, score: [1, 0], overtime: false, reason: 'time' }, 10);
+    const message = s.takeRunMessage();
+    expect(message?.phase).toBe('between');
+    expect(message!.offer.length).toBeGreaterThan(0);
+    expect(message!.chooser).not.toBeNull();
+  });
+
+  it('announces the new chooser when the host leaves', () => {
+    const s = server();
+    const host = s.join()!;
+    const other = s.join()!;
+    s.run.finishRound({ winner: 0, score: [1, 0], overtime: false, reason: 'time' }, 10);
+    s.takeRunMessage();
+
+    s.leave(host.handle.id);
+    expect(s.takeRunMessage()?.chooser).toBe(other.handle.id);
+  });
+
+  it('says nothing when nothing changed', () => {
+    const s = server();
+    s.join();
+    s.takeRunMessage();
+    for (let i = 0; i < 30; i++) s.step();
+    expect(s.takeRunMessage()).toBeNull();
+  });
+});
+
+describe('the server does not get stuck', () => {
+  it('starts a new run after one ends', () => {
+    // It used to sit on the finished match forever: one run per process.
+    const s = new GameServer({ maxClients: 2, botOpponents: 1, random: () => 0.5, restartAfter: 1 });
+    s.join();
+    s.run.finishRound({ winner: 1, score: [0, 2], overtime: false, reason: 'goal-target' }, 10);
+    expect(s.runState().phase).toBe('over');
+
+    for (let i = 0; i < Math.ceil(1.1 / s.stepSeconds); i++) s.step();
+    const run = s.runState();
+    expect(run.phase).toBe('round');
+    expect(run.round).toBe(1);
+    // A fresh run, not the old one resumed.
+    expect(run.taken).toEqual([]);
+  });
+
+  it('picks for a host who has walked away', () => {
+    const s = new GameServer({ maxClients: 2, botOpponents: 1, random: () => 0.5, pickTimeout: 1 });
+    s.join();
+    s.run.finishRound({ winner: 0, score: [1, 0], overtime: false, reason: 'time' }, 10);
+    expect(s.runState().phase).toBe('between');
+
+    for (let i = 0; i < Math.ceil(1.1 / s.stepSeconds); i++) s.step();
+    const run = s.runState();
+    expect(run.phase).toBe('round');
+    expect(run.round).toBe(2);
+    expect(run.taken).toHaveLength(1);
+  });
+
+  it('waits the full timeout before picking, not a step', () => {
+    const s = new GameServer({ maxClients: 2, botOpponents: 1, random: () => 0.5, pickTimeout: 1 });
+    s.join();
+    s.run.finishRound({ winner: 0, score: [1, 0], overtime: false, reason: 'time' }, 10);
+    for (let i = 0; i < Math.floor(0.5 / s.stepSeconds); i++) s.step();
+    expect(s.runState().phase).toBe('between');
+  });
+});
