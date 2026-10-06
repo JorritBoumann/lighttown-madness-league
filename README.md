@@ -1153,7 +1153,8 @@ it online is two steps:
    the page's URL still overrides it, for trying a different server without a
    rebuild.
 
-On Fly.io, `fly.toml` has it set up: Amsterdam, a 512MB shared machine that
+It runs on Fly.io at `wss://lighttown-madness-league.fly.dev`, which
+`.env.production` points the published game at. `fly.toml` has it set up: Amsterdam, a 512MB shared machine that
 stops when nobody is connected and starts on the next connection.
 
 ```bash
