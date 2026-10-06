@@ -1,0 +1,51 @@
+# The game server on Fly.io. See "Putting it online" in the README.
+#
+# One machine, always: every room lives in one process's memory, so a second
+# machine would be a second set of rooms, and a code made on one would be "no
+# such room" to anyone the proxy sent to the other. Deploy with --ha=false.
+
+app = 'lighttown-madness-league'
+# Amsterdam: nearest to Eindhoven, and round-trip time is the whole game.
+primary_region = 'ams'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  PORT = '8080'
+  # Unset for now: the published game's page may be framed, and a sandboxed
+  # frame connects with origin "null". The server logs each room's origin;
+  # set this from what it logs, e.g. 'https://games.stateloop.ai'.
+  # ALLOWED_ORIGINS = 'https://games.stateloop.ai'
+  # About 8.5MB a room, measured: twelve stays well inside 512MB, and inside
+  # what a shared CPU can step at 120Hz without leaning on its burst.
+  MAX_ROOMS = '12'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Stopped when nobody is connected, started by the next connection. A
+  # stopped machine costs nothing but its image, and the rooms it would lose
+  # are empty ones. An open WebSocket counts as a connection, so a match in
+  # progress keeps it running.
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = 'connections'
+    soft_limit = 20
+    # Two seats a room, a few spare for refusals to arrive as a close code
+    # rather than as the proxy turning the connection away.
+    hard_limit = 30
+
+  [[http_service.checks]]
+    grace_period = '10s'
+    interval = '30s'
+    method = 'GET'
+    path = '/health'
+    timeout = '3s'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'

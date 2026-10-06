@@ -1153,6 +1153,15 @@ it online is two steps:
    the page's URL still overrides it, for trying a different server without a
    rebuild.
 
+On Fly.io, `fly.toml` has it set up: Amsterdam, a 512MB shared machine that
+stops when nobody is connected and starts on the next connection.
+
+```bash
+fly apps create lighttown-madness-league
+fly deploy --ha=false       # one machine: see below
+fly logs                    # each room logs the page origin it came from
+```
+
 One process holds every room in memory, and a room cannot move between
 processes, so this is one instance, not a scaled-out fleet. That is plenty: a
 room costs about a tenth of a millisecond per step, which is some seventy rooms

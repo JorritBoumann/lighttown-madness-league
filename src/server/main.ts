@@ -117,7 +117,10 @@ async function main(): Promise<void> {
         socket.close(CLOSE.SERVER_FULL, 'server full');
         return;
       }
-      log(`room ${room.code} opened (${registry.size} live)`);
+      // With the page it came from: which origins actually connect is what
+      // ALLOWED_ORIGINS has to be set from, and a page embedded in a
+      // sandboxed frame says "null" rather than its address.
+      log(`room ${room.code} opened from ${request.headers.origin ?? 'no origin'} (${registry.size} live)`);
     } else {
       room = registry.get(asked);
       if (!room) {
