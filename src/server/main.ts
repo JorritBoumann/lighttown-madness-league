@@ -7,6 +7,7 @@ import { CLOSE, decodeClient, encode, type ServerMessage } from './protocol';
 import { cfg } from '../config';
 import { Site } from './site';
 import { RecordingStore } from './recordingStore';
+import { AccessGate } from './access';
 
 /**
  * The server.
@@ -67,6 +68,21 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .map((o) => o.trim())
   .filter(Boolean);
 
+/**
+ * The team's access code; unset leaves the game open, as it is locally. Set on
+ * Fly as a secret, never in the repo. See access.ts.
+ */
+const ACCESS_CODE = process.env.ACCESS_CODE?.trim() || null;
+/**
+ * Pages that may open rooms without the code, comma-separated: a copy of the
+ * game hosted somewhere with its own sign-in, which cannot carry this site's
+ * cookie because it is on another domain.
+ */
+const TRUSTED_ORIGINS = (process.env.TRUSTED_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 async function main(): Promise<void> {
   await initPhysics();
 
@@ -95,19 +111,44 @@ async function main(): Promise<void> {
     const mb = (n: number): string => (n / 1e6).toFixed(1);
     log(`serving the game from ${SITE_DIR}: ${site.size} files, ${mb(raw)}MB (${mb(br)}MB compressed)`);
   }
+  const gate = ACCESS_CODE ? new AccessGate(ACCESS_CODE) : null;
+  log(gate ? 'access code required' : 'no access code: open to anyone with the address');
+  const answerHealth = (response: import('node:http').ServerResponse): void => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ ok: true, rooms: registry.size, max: MAX_ROOMS }));
+  };
   const http = createServer((request, response) => {
+    // Open whatever else is closed: the host polls it to know the server is up.
+    if (request.url === '/health') {
+      answerHealth(response);
+      return;
+    }
+    if (gate && !gate.allows(request)) {
+      gate.handle(request, response);
+      return;
+    }
     if (site?.serve(request, response)) return;
-    if (request.url === '/health' || request.url === '/') {
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ ok: true, rooms: registry.size, max: MAX_ROOMS }));
+    if (request.url === '/') {
+      answerHealth(response);
       return;
     }
     response.writeHead(404).end();
   });
   const wss = new WebSocketServer({
     server: http,
-    verifyClient: ({ origin }: { origin: string }) =>
-      ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes(origin),
+    verifyClient: ({ origin, req }: { origin: string; req: import('node:http').IncomingMessage }) => {
+      if (ALLOWED_ORIGINS.length > 0 && !ALLOWED_ORIGINS.includes(origin)) {
+        log(`refused a connection from ${origin || 'no origin'}: not an allowed page`);
+        return false;
+      }
+      if (gate && !gate.allows(req) && !TRUSTED_ORIGINS.includes(origin)) {
+        // Logged with the page, because the first refusal from a copy of the
+        // game hosted elsewhere is how its origin becomes known.
+        log(`refused a connection from ${origin || 'no origin'}: no access code`);
+        return false;
+      }
+      return true;
+    },
   });
   // Listening on every interface: inside a container, localhost is the
   // container itself, and nothing outside it could connect.

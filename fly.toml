@@ -13,6 +13,9 @@ primary_region = 'ams'
 
 [env]
   PORT = '8080'
+  # ACCESS_CODE is a secret (fly secrets set ACCESS_CODE=...), not set here.
+  # Pages with their own sign-in that may open rooms without it go in
+  # TRUSTED_ORIGINS, once known from the server's "refused" log lines.
   # Unset for now: the published game's page may be framed, and a sandboxed
   # frame connects with origin "null". The server logs each room's origin;
   # set this from what it logs, e.g. 'https://games.stateloop.ai'. The game

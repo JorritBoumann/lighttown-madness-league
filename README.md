@@ -1209,6 +1209,20 @@ fly deploy --ha=false       # one machine: see below
 fly logs                    # each room logs the page origin it came from
 ```
 
+The game is for the team, so the Fly app asks for a shared access code
+before serving anything but `/health`. The right code sets a cookie that lasts
+six months and also opens the rooms; invitations go through the code page and
+on into their room. The code is a Fly secret, not in the repo:
+
+```bash
+fly secrets set ACCESS_CODE=new-code-here   # changing it signs everyone out
+```
+
+Unset, as locally, the game is open. A copy of the game hosted elsewhere with
+its own sign-in -- Stateloop's -- cannot carry this site's cookie, so its page
+goes in `TRUSTED_ORIGINS`; the server logs the origin of each refused
+connection, which is how to find it.
+
 One process holds every room in memory, and a room cannot move between
 processes, so this is one instance, not a scaled-out fleet. That is plenty: a
 room costs about a tenth of a millisecond per step, which is some seventy rooms
