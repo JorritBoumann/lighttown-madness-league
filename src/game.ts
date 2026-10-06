@@ -8,6 +8,7 @@ import { Car } from './physics/car';
 import { BoostPads } from './physics/boostPads';
 import { Simulation, type SimCar } from './sim/simulation';
 import { NetClient } from './net/client';
+import { TouchSource } from './input/touch';
 import { MODIFIERS } from './state/modifiers';
 import { BOSSES } from './state/bosses';
 import { UPGRADES } from './state/upgrades';
@@ -265,6 +266,7 @@ export class Game {
     this.addCar(0, 0, null);
 
     this.controls = new Controls();
+    this.controls.attachTouch(new TouchSource(ui));
     this.hud = new Hud(ui);
     this.radar = new Radar(ui);
     this.matchHud = new MatchHud(ui);

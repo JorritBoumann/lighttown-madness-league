@@ -679,3 +679,131 @@ html, body {
 
 /* Menu items are clickable as well as keyable. */
 .menu-list li { cursor: pointer; }
+
+/* --- Touch controls -------------------------------------------------------
+   Only on a touchscreen: `body.touch` is set the first time a finger lands, or
+   up front on a device whose pointer is a finger. Everything else in the HUD
+   rearranges around them, because the buttons need the bottom-right corner
+   that the radar and boost gauge were using. */
+.touch-layer { display: none; position: absolute; inset: 0; pointer-events: none; }
+body.touch .touch-layer { display: block; }
+body.touch, body.touch canvas { touch-action: none; overscroll-behavior: none; }
+body.touch * { -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+
+/* The left half below the round strip: put a thumb anywhere and the stick
+   appears under it. */
+.touch-stick-zone {
+  position: absolute;
+  left: 0;
+  top: 70px;
+  bottom: 0;
+  width: 50%;
+  pointer-events: auto;
+  touch-action: none;
+}
+.touch-stick {
+  position: fixed;
+  width: 128px;
+  height: 128px;
+  margin: -64px 0 0 -64px;
+  border-radius: 50%;
+  border: 2px solid rgba(190, 215, 245, 0.35);
+  background: rgba(8, 12, 20, 0.28);
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+}
+.touch-knob {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: rgba(190, 220, 255, 0.55);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+.touch-btn {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  background: rgba(8, 12, 20, 0.5);
+  color: #eef4ff;
+  font: 650 12px/1 system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.touch-btn.down { background: rgba(79, 195, 247, 0.45); border-color: rgba(120, 200, 255, 0.9); }
+/* Jump is the one pressed most and fastest, so it is the biggest and nearest
+   the corner a right thumb rests in. */
+.touch-jump {
+  width: 88px; height: 88px;
+  right: calc(22px + env(safe-area-inset-right, 0px));
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+}
+.touch-boost {
+  width: 70px; height: 70px;
+  right: calc(122px + env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.touch-boost.down { background: rgba(255, 193, 77, 0.5); border-color: rgba(255, 210, 120, 0.95); }
+.touch-drift {
+  width: 62px; height: 62px;
+  right: calc(34px + env(safe-area-inset-right, 0px));
+  bottom: calc(124px + env(safe-area-inset-bottom, 0px));
+}
+.touch-pause {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(8, 12, 20, 0.55);
+  color: #eef4ff;
+  font: 700 14px/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+}
+
+/* The HUD, moved out of the buttons' way. */
+body.touch .hud-help,
+body.touch .hud-flags,
+body.touch .best-line { display: none; }
+body.touch .hud-boost {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  width: 72px;
+  height: 72px;
+}
+body.touch .hud-boost-value { font-size: 20px; }
+body.touch .hud-radar {
+  bottom: auto;
+  top: calc(58px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  width: 92px;
+  height: 110px;
+}
+body.touch .hud-room { top: calc(176px + env(safe-area-inset-top, 0px)); right: 12px; }
+
+/* Held upright, a phone gives the pitch a sliver of the screen and puts the
+   buttons over the car. Say so rather than letting it be unplayable. */
+.rotate-hint { display: none; }
+@media (orientation: portrait) {
+  body.touch .rotate-hint {
+    display: grid;
+    place-items: center;
+    position: fixed;
+    inset: 0;
+    padding: 24px;
+    text-align: center;
+    font: 650 18px/1.4 system-ui, sans-serif;
+    background: rgba(6, 9, 16, 0.92);
+    pointer-events: auto;
+    z-index: 5;
+  }
+}

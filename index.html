@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- No zooming and no bounce: a pinch or a double tap on the stick should
+         steer, not resize the page. viewport-fit lets the controls sit inside
+         a notched phone's safe area rather than under the notch. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Lighttown Madness League</title>
     <link rel="stylesheet" href="/src/ui/style.css" />
   </head>

@@ -8,7 +8,7 @@ export class Hud {
   private readonly boostValue: HTMLElement;
   private readonly speedValue: HTMLElement;
   private readonly help: HTMLElement;
-  private device: 'keyboard' | 'gamepad' | null = null;
+  private device: 'keyboard' | 'gamepad' | 'touch' | null = null;
   private readonly flags: Record<string, HTMLElement> = {};
 
   constructor(parent: HTMLElement) {
@@ -50,9 +50,15 @@ export class Hud {
    * Swaps the controls reminder for whichever device is in use. Showing keyboard
    * hints to someone holding a pad is worse than showing nothing.
    */
-  setDevice(device: 'keyboard' | 'gamepad'): void {
+  setDevice(device: 'keyboard' | 'gamepad' | 'touch'): void {
     if (device === this.device) return;
     this.device = device;
+    // On a touchscreen the controls are on screen and labelled, so a list of
+    // keys the player does not have is just clutter over the stick.
+    if (device === 'touch') {
+      this.help.innerHTML = '';
+      return;
+    }
     this.help.innerHTML =
       device === 'gamepad'
         ? `<div><kbd>RT</kbd>/<kbd>LT</kbd> drive &middot; <kbd>L stick</kbd> steer, pitch in air</div>
