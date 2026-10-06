@@ -48,6 +48,18 @@ export default defineConfig(({ isSsrBuild }) => ({
     },
   },
   server: { port: 5173, host: '127.0.0.1' },
+  /**
+   * The game server bundles everything it uses into one file.
+   *
+   * By default an SSR build leaves its packages as imports to be found in
+   * node_modules at run time -- here that is `ws` and Rapier, both of which
+   * are only installed for development. One self-contained file is what makes
+   * the server's container a Node runtime and a single script, with no install
+   * step and nothing to drift from what was tested.
+   */
+  ssr: { noExternal: true },
+  // The browser's static files are no use to the server.
+  publicDir: isSsrBuild ? false : 'public',
   test: {
     /**
      * Twenty seconds rather than vitest's five.
@@ -64,11 +76,12 @@ export default defineConfig(({ isSsrBuild }) => ({
   build: {
     target: 'es2022',
 
-    // Three is about 520kB minified and there is no getting it much below that
-    // while using a renderer at all, so the default 500kB warning fires on every
-    // build and means nothing. Set above it, so it means something again.
-    chunkSizeWarningLimit: 600,
-    rolldownOptions: {
+    // Three is about 670kB minified (r186) and there is no getting it much
+    // below that while using a renderer at all, so the default 500kB warning
+    // fires on every build and means nothing. Set above it, so it means
+    // something again.
+    chunkSizeWarningLimit: 720,
+    rolldownOptions: isSsrBuild ? {} : {
       output: {
         // Three and Rapier change far less often than the game does, so they
         // get their own chunks and stay in the browser cache across deploys.

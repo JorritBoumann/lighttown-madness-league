@@ -1099,6 +1099,9 @@ npm run server          # ws://localhost:8080: rooms of 2 seats, 1 bot, at most 
 PORT=9000 SEATS=4 BOTS=0 MAX_ROOMS=8 IDLE_SECONDS=120 npm run server
 ```
 
+`ALLOWED_ORIGINS` limits which pages may connect, comma-separated, for example
+`https://games.stateloop.ai`; unset, any page can.
+
 In the game, **Play online** makes a room and gives you a four-character code
 to send someone, or joins the room their code names. The address bar becomes
 the invitation once you are in, so sending the link works as well as the code.
@@ -1119,12 +1122,38 @@ score, a car each, and the opposition the round called for. The run lives on the
 server, because a run is a sequence of decisions — which round, which modifiers,
 which upgrades — and two clients deciding those separately is two different
 games being played at once. Between rounds the upgrade is picked by whoever has
-been connected longest, and it applies to every human car rather than to one. It is a separate page from
-the game on purpose: the single-player one owns a run, upgrades and round
-modifiers, all of which the server would have to own instead, and this is the
-smallest thing that proves the protocol.
+been connected longest, and it applies to every human car rather than to one.
 
 Clients send `CarInput` and nothing else — there is no message carrying a
 position, so a client cannot assert one. The server replies with snapshots at
 30Hz while simulating at 120Hz, each carrying the last input sequence it
 consumed from that client, which is the hook client-side prediction hangs on.
+
+### Putting it online
+
+The published game is static files, and a static host has no game server, so
+**Play online** is hidden there until the build is told where one is. Getting
+it online is two steps:
+
+1. **Run the server somewhere.** The `Dockerfile` builds it into an image that
+   is Node and one bundled file, listening on `PORT` (8080 by default) for both
+   the game's WebSocket and a plain `GET /health`, which is what hosts poll to
+   know it is alive. Any host that runs a container will do: Fly.io, Render,
+   Railway, Google Cloud Run (with a minimum of one instance, since rooms live
+   in memory). Set `ALLOWED_ORIGINS` to the page the game is served from. The
+   host's HTTPS address is the server's address with `wss://` in front.
+
+2. **Tell the game where it is.** Commit a `.env.production` with
+
+   ```
+   VITE_GAME_SERVER=wss://your-server.example
+   ```
+
+   and the next build offers **Play online** and connects there. `?server=` on
+   the page's URL still overrides it, for trying a different server without a
+   rebuild.
+
+One process holds every room in memory, and a room cannot move between
+processes, so this is one instance, not a scaled-out fleet. That is plenty: a
+room costs about a tenth of a millisecond per step, which is some seventy rooms
+to a core before the step rate is at risk, and `MAX_ROOMS` keeps it under that.

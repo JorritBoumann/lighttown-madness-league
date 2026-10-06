@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { initPhysics } from '../physics/world';
 import { SNAPSHOT_HZ } from './gameServer';
@@ -38,6 +39,19 @@ const IDLE_SECONDS = Number(process.env.IDLE_SECONDS ?? 60);
  * as if steps were expensive.
  */
 const MAX_CATCHUP_SECONDS = 0.25;
+/**
+ * Pages allowed to connect, comma-separated; unset allows any.
+ *
+ * A browser always sends the page's origin on a WebSocket upgrade, so this is
+ * what stops someone else's page from opening rooms on this server. It is not
+ * authentication -- anything that is not a browser can send any origin it
+ * likes -- which is fine, because there is nothing here to protect but
+ * capacity, and the room cap already bounds that.
+ */
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 async function main(): Promise<void> {
   await initPhysics();
@@ -49,7 +63,46 @@ async function main(): Promise<void> {
   });
   // Client ids are only unique within a room, so sockets are filed per room.
   const sockets = new Map<string, Map<number, WebSocket>>();
-  const wss = new WebSocketServer({ port: PORT });
+  /**
+   * Plain HTTP alongside the sockets, for whatever hosts this.
+   *
+   * Every host checks that a process is alive by requesting a page from it,
+   * and a bare WebSocket server answers that with 426 Upgrade Required -- which
+   * reads as down, so the host restarts it, for ever. `/health` answers 200
+   * with the room count, which is also the quickest way to see whether anyone
+   * is playing.
+   */
+  const http = createServer((request, response) => {
+    if (request.url === '/health' || request.url === '/') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ ok: true, rooms: registry.size, max: MAX_ROOMS }));
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  const wss = new WebSocketServer({
+    server: http,
+    verifyClient: ({ origin }: { origin: string }) =>
+      ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes(origin),
+  });
+  // Listening on every interface: inside a container, localhost is the
+  // container itself, and nothing outside it could connect.
+  // Said once the port is actually held, not before: "listening" followed by
+  // a crash, when the port was taken, is a log that lies for one line.
+  // On the socket server, which re-emits the HTTP server's errors as its own
+  // and would otherwise throw them before any handler here ran.
+  wss.once('error', (error: NodeJS.ErrnoException) => {
+    process.stderr.write(
+      `[server] cannot listen on port ${PORT}: ${error.code === 'EADDRINUSE' ? 'already in use' : error.message}\n`,
+    );
+    process.exit(1);
+  });
+  http.listen(PORT, '0.0.0.0', () => {
+    log(
+      `listening on port ${PORT} — rooms of ${SEATS} seats, ${BOTS} bot(s), at most ${MAX_ROOMS}` +
+        (ALLOWED_ORIGINS.length > 0 ? `, pages from ${ALLOWED_ORIGINS.join(' ')}` : ', pages from anywhere'),
+    );
+  });
 
   wss.on('connection', (socket, request) => {
     // The room comes in on the URL: `?room=ABCD` to join, `?room=new` or
@@ -207,11 +260,13 @@ async function main(): Promise<void> {
   };
 
   const timer = setInterval(tick, step);
-  log(`listening on ws://localhost:${PORT} — rooms of ${SEATS} seats, ${BOTS} bot(s), at most ${MAX_ROOMS}`);
-
   const shutdown = (): void => {
     clearInterval(timer);
+    // Told, rather than cut off: a client sees a clean close and says the
+    // match ended, instead of waiting out a timeout on a socket that is gone.
+    for (const client of wss.clients) client.close(1001, 'server stopping');
     wss.close();
+    http.close();
     log('stopped');
     process.exit(0);
   };
