@@ -15,8 +15,9 @@ primary_region = 'ams'
   PORT = '8080'
   # Unset for now: the published game's page may be framed, and a sandboxed
   # frame connects with origin "null". The server logs each room's origin;
-  # set this from what it logs, e.g. 'https://games.stateloop.ai'.
-  # ALLOWED_ORIGINS = 'https://games.stateloop.ai'
+  # set this from what it logs, e.g. 'https://games.stateloop.ai'. The game
+  # is also served from this app, so its own address has to be in the list.
+  # ALLOWED_ORIGINS = 'https://games.stateloop.ai,https://lighttown-madness-league.fly.dev'
   # About 8.5MB a room, measured: twelve stays well inside 512MB, and inside
   # what a shared CPU can step at 120Hz without leaning on its burst.
   MAX_ROOMS = '12'

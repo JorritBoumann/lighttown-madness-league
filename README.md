@@ -1154,7 +1154,9 @@ it online is two steps:
    rebuild.
 
 It runs on Fly.io at `wss://lighttown-madness-league.fly.dev`, which
-`.env.production` points the published game at. `fly.toml` has it set up: Amsterdam, a 512MB shared machine that
+`.env.production` points the published game at. The same app serves the game
+itself at https://lighttown-madness-league.fly.dev, a link that can be sent to
+anyone; an invitation is that address with `?room=CODE` on the end. `fly.toml` has it set up: Amsterdam, a 512MB shared machine that
 stops when nobody is connected and starts on the next connection.
 
 ```bash

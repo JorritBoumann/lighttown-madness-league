@@ -459,7 +459,9 @@ export class Game {
     // The menu only offers this when there is a server, so this is a guard
     // against being called some other way, not an expected path.
     if (!server) return;
-    params.set('server', server);
+    // Only the room goes on the address. The server is found the same way
+    // again after the reload -- from the page's own `?server` if it had one,
+    // or the build's -- and leaving it off keeps the invitation short.
     params.set('room', room);
     location.search = params.toString();
   }

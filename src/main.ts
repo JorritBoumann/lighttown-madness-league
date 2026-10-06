@@ -1,4 +1,5 @@
 import { Game } from './game';
+import { configuredServer } from './net/serverAddress';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
@@ -9,7 +10,9 @@ try {
   // either way: the difference is who owns the run, and nothing the player
   // looks at knows which it is.
   const params = new URLSearchParams(location.search);
-  const server = params.get('server');
+  // A room on its own is enough when the build knows its server, so an
+  // invitation is the page's address and a code, not a server address too.
+  const server = params.get('server') ?? (params.has('room') ? configuredServer() : null);
   // The room rides on the socket URL, which is where the server reads it. No
   // room at all means "make me one", the same as asking for `new`.
   let url: string | undefined;

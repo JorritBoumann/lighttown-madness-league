@@ -5,6 +5,7 @@ import { SNAPSHOT_HZ } from './gameServer';
 import { RoomRegistry, type Room } from './rooms';
 import { CLOSE, decodeClient, encode, type ServerMessage } from './protocol';
 import { cfg } from '../config';
+import { Site } from './site';
 
 /**
  * The server.
@@ -40,6 +41,11 @@ const IDLE_SECONDS = Number(process.env.IDLE_SECONDS ?? 60);
  */
 const MAX_CATCHUP_SECONDS = 0.25;
 /**
+ * The built game, to serve alongside the rooms; unset serves only the rooms.
+ * The container sets it, so the server's address is also a link to the game.
+ */
+const SITE_DIR = process.env.SITE_DIR;
+/**
  * Pages allowed to connect, comma-separated; unset allows any.
  *
  * A browser always sends the page's origin on a WebSocket upgrade, so this is
@@ -72,7 +78,14 @@ async function main(): Promise<void> {
    * with the room count, which is also the quickest way to see whether anyone
    * is playing.
    */
+  const site = SITE_DIR ? new Site(SITE_DIR) : null;
+  if (site) {
+    const { raw, br } = site.weight;
+    const mb = (n: number): string => (n / 1e6).toFixed(1);
+    log(`serving the game from ${SITE_DIR}: ${site.size} files, ${mb(raw)}MB (${mb(br)}MB compressed)`);
+  }
   const http = createServer((request, response) => {
+    if (site?.serve(request, response)) return;
     if (request.url === '/health' || request.url === '/') {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ ok: true, rooms: registry.size, max: MAX_ROOMS }));
