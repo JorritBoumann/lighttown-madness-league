@@ -22,6 +22,11 @@ export class ResolutionScaler {
   private readonly window: number[] = [];
   /** Seconds left before another change is allowed. */
   private cooldown = 0;
+  /**
+   * True once frames were slow with the resolution already at its floor:
+   * this lever is spent, and the game has to shed work some other way.
+   */
+  exhausted = false;
 
   constructor(ceiling: number) {
     this.ceiling = Math.max(cfg.render.scaleFloor, ceiling);
@@ -60,6 +65,7 @@ export class ResolutionScaler {
 
     let next = this.current;
     if (median > r.scaleDownMs) {
+      if (this.current <= r.scaleFloor) this.exhausted = true;
       next = Math.max(r.scaleFloor, this.current - r.scaleStep);
     } else if (median < r.scaleUpMs) {
       next = Math.min(this.ceiling, this.current + r.scaleStep);

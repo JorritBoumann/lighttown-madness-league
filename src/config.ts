@@ -775,6 +775,20 @@ export const config = {
     // the car's own lamps and trim were over the line, and since the car is the
     // nearest object to the camera they bloomed harder than the arena did.
     bloomThreshold: 0.84,
+
+    /**
+     * Low-power mode, for phones and for anything the adaptive resolution
+     * could not save. The crowd is 295,000 of the scene's 311,000 triangles and
+     * the shadow map about half of each frame, so those two and the bloom are
+     * where the time is. On from the start on a touchscreen, and on any device
+     * once the resolution is at its floor and frames are still slow.
+     * `?quality=low` or `?quality=high` on the address forces either way.
+     */
+    lowPower: {
+      /** Share of the crowd kept, chosen evenly across every stand. */
+      crowdKeep: 0.35,
+      shadowMapSize: 1024,
+    },
   },
 
   camera: {

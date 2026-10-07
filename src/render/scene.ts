@@ -33,6 +33,10 @@ export interface Renderer {
   pace(frameMs: number): void;
   /** Current pixel ratio, for the debug readout. */
   readonly pixelRatio: number;
+  /** Frames are slow even at the lowest resolution; see lowPower. */
+  readonly struggling: boolean;
+  /** Turns off the bloom and shrinks the shadow map, for good. */
+  setLowPower(): void;
   resize(): void;
 }
 
@@ -203,12 +207,33 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     resize();
   }
 
+  function setLowPower(): void {
+    // The bloom is a chain of blurs over the whole screen at several sizes,
+    // which is a lot of fill on a phone for a glow.
+    bloom.enabled = false;
+    const size = cfg.render.lowPower.shadowMapSize;
+    scene.traverse((obj) => {
+      const light = obj as THREE.DirectionalLight;
+      if (!light.isDirectionalLight || !light.castShadow) return;
+      if (light.shadow.mapSize.x <= size) return;
+      light.shadow.mapSize.set(size, size);
+      // The map is made at its old size; dropping it makes three.js build a
+      // new one at the new size on the next frame.
+      light.shadow.map?.dispose();
+      light.shadow.map = null;
+    });
+  }
+
   return {
     renderer,
     scene,
     camera,
     draw,
     compile,
+    setLowPower,
+    get struggling() {
+      return scaler.exhausted;
+    },
     pace,
     resize,
     get pixelRatio() {

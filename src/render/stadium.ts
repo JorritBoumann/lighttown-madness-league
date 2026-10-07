@@ -31,6 +31,35 @@ export interface Stadium {
   update(dt: number, info: StadiumInfo): void;
   /** Sets the crowd off: flashes come thick and fast for a few seconds. */
   celebrate(seconds: number): void;
+  /** Keeps this share of the crowd, spread evenly; see thinInstances. */
+  thinCrowd(keep: number): void;
+}
+
+/**
+ * Keeps a share of an instanced mesh's instances, spread evenly through it.
+ *
+ * Lowering `count` alone draws the first so many, which for the crowd would
+ * fill some stands and leave others empty. Instead the kept ones are moved to
+ * the front first, picked by the golden ratio so that every stretch of seats
+ * keeps about the same share. Only ever thins; it does not bring them back.
+ */
+export function thinInstances(mesh: THREE.InstancedMesh, keep: number): void {
+  const total = mesh.count;
+  const kept: number[] = [];
+  const dropped: number[] = [];
+  for (let i = 0; i < total; i++) ((i * 0.6180339887498949) % 1 < keep ? kept : dropped).push(i);
+  const order = kept.concat(dropped);
+  const matrices = mesh.instanceMatrix.array;
+  const fromMatrices = matrices.slice();
+  const colours = mesh.instanceColor?.array;
+  const fromColours = colours?.slice();
+  order.forEach((from, to) => {
+    matrices.set(fromMatrices.subarray(from * 16, from * 16 + 16), to * 16);
+    if (colours && fromColours) colours.set(fromColours.subarray(from * 3, from * 3 + 3), to * 3);
+  });
+  mesh.count = kept.length;
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 }
 
 /** Reused for the spectators' facing rotation. */
@@ -603,6 +632,9 @@ export function buildStadium(layout: ArenaLayout): Stadium {
     group,
     celebrate(seconds) {
       celebrating = Math.max(celebrating, seconds);
+    },
+    thinCrowd(keep) {
+      thinInstances(people, keep);
     },
     update(dt, info) {
       elapsed += dt;

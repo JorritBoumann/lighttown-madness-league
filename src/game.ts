@@ -98,6 +98,12 @@ const TRAIL_COLOUR_ORANGE = new THREE.Color(0xff8a50);
 /** How long the upgrade picker ignores keys and buttons after it opens. */
 const PICKER_GRACE_MS = 600;
 
+/** `?quality=low` or `?quality=high` on the address, to force the graphics either way. */
+function qualityAsked(): 'low' | 'high' | null {
+  const q = new URLSearchParams(location.search).get('quality');
+  return q === 'low' || q === 'high' ? q : null;
+}
+
 /** Menu items that put the player on the pitch, where a phone goes fullscreen. */
 const PLAY_ITEMS = new Set(['start', 'again', 'freeplay', 'resume', 'restart']);
 
@@ -128,6 +134,8 @@ export class Game {
    * goals, which rebuilds the arena, but it never changes the stands.
    */
   private readonly stadium: Stadium;
+  /** Bloom off, a smaller shadow map and a thinner crowd; see enterLowPower. */
+  private lowPower = false;
   /** Optional art files; empty unless something was dropped in public/assets. */
   private readonly assets: GameAssets;
   /** The goal celebration, which also owns the slow motion. */
@@ -258,6 +266,14 @@ export class Game {
     this.render.scene.add(this.arenaMesh);
     this.stadium = buildStadium(buildArenaLayout());
     this.render.scene.add(this.stadium.group);
+    // A phone or tablet starts in low power rather than discovering it: the
+    // adaptive resolution takes twenty seconds of bad frames to reach its
+    // floor, which is the first twenty seconds anyone sees of the game.
+    const quality = qualityAsked();
+    const touchscreen = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+    if (quality === 'low' || (touchscreen && quality !== 'high')) {
+      this.enterLowPower(quality === 'low' ? 'asked for on the address' : 'touchscreen device');
+    }
 
     // Reflections, from the arena itself. Taken here because the building is
     // in the scene and no car or ball is yet: those move, and baking one in
@@ -371,6 +387,21 @@ export class Game {
     await game.warmUp();
     if (serverUrl) game.join(serverUrl);
     return game;
+  }
+
+  /**
+   * Sheds the work a phone cannot afford, once and for the rest of the visit.
+   *
+   * One way only. Coming back out when frames recover would flip the crowd
+   * and the glow on and off as the load changed, which looks worse than
+   * either setting held still.
+   */
+  private enterLowPower(reason: string): void {
+    if (this.lowPower) return;
+    this.lowPower = true;
+    this.render.setLowPower();
+    this.stadium.thinCrowd(cfg.render.lowPower.crowdKeep);
+    console.info(`[lighttown] low-power mode: ${reason}`);
   }
 
   /**
@@ -984,6 +1015,9 @@ export class Game {
     // Hand the real frame time to the adaptive resolution. `dt` here is the
     // render delta, which is the frame time whatever the physics did inside it.
     this.render.pace(dt * 1000);
+    if (!this.lowPower && this.render.struggling && qualityAsked() !== 'high') {
+      this.enterLowPower('frames are slow at the lowest resolution');
+    }
 
     // Before the replay, not after it. The winning goal starts a replay at the
     // same moment the picker opens, and a replay frame returns early -- so a

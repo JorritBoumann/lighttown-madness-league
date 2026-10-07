@@ -40,6 +40,15 @@ describe('resolution scaler', () => {
     expect(s.scale).toBeGreaterThanOrEqual(cfg.render.scaleFloor);
   });
 
+  it('says when even the floor is too slow, and not before', () => {
+    const s = new ResolutionScaler(2);
+    feed(s, 30, 300);
+    expect(s.exhausted).toBe(false);
+    feed(s, 30, 3000);
+    expect(s.scale).toBe(cfg.render.scaleFloor);
+    expect(s.exhausted).toBe(true);
+  });
+
   it('climbs back when the load lets up', () => {
     const s = new ResolutionScaler(2);
     feed(s, 30, 600);
