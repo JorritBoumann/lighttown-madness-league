@@ -35,7 +35,13 @@ import { Ribbon } from './render/ribbon';
 import { Replay } from './render/replay';
 import { clamp } from './core/mathx';
 import { buildArenaLayout } from './core/arenaLayout';
-import { createCarMesh, createBallMesh, createBoostPadVisuals, type PadVisuals } from './render/entities';
+import {
+  createCarMesh,
+  createBallMesh,
+  createBoostPadVisuals,
+  disposeCarMesh,
+  type PadVisuals,
+} from './render/entities';
 import { ChaseCamera } from './render/chaseCamera';
 import { TransformInterpolator } from './core/interpolate';
 import { Loop } from './core/loop';
@@ -362,8 +368,24 @@ export class Game {
     const probe = createRenderer(canvas);
     const assets = await loadAssets(probe.renderer);
     const game = new Game(ui, probe, assets);
+    await game.warmUp();
     if (serverUrl) game.join(serverUrl);
     return game;
+  }
+
+  /**
+   * Compiles every shader the scene uses, while the loading screen is up.
+   *
+   * three.js otherwise compiles a material's shader the first time it is drawn,
+   * so the first frame of the title screen compiled 25 of them at once: a
+   * quarter-second freeze on a fast laptop, and seconds on a phone. Compiled
+   * here, the work happens before anything is on screen, and in parallel
+   * where the browser can. The frame drawn after it does the same for the
+   * post-processing passes, which are not in the scene.
+   */
+  private async warmUp(): Promise<void> {
+    await this.render.compile();
+    this.render.draw();
   }
 
   start(): void {
@@ -561,9 +583,7 @@ export class Game {
     const entry = this.entries.pop();
     if (!entry) return;
     this.sim.removeLastCar();
-    this.render.scene.remove(entry.mesh);
-    this.render.scene.remove(entry.streak.mesh);
-    entry.streak.dispose();
+    this.releaseCar(entry);
   }
 
   /** The server's run state, mirrored into the one the HUD already reads. */
@@ -711,10 +731,18 @@ export class Game {
     for (let i = 0; i < removed.length; i++) {
       const entry = this.entries.pop();
       if (!entry) break;
-      this.render.scene.remove(entry.mesh);
-      this.render.scene.remove(entry.streak.mesh);
-      entry.streak.dispose();
+      this.releaseCar(entry);
     }
+  }
+
+  /** Takes a car's visuals off the pitch and frees them. */
+  private releaseCar(entry: CarEntry): void {
+    this.render.scene.remove(entry.mesh);
+    this.render.scene.remove(entry.streak.mesh);
+    entry.streak.dispose();
+    // A car cloned from a loaded model shares its buffers with the model and
+    // with every other car, so only a car built here owns anything to free.
+    if (!this.assets.carModel) disposeCarMesh(entry.mesh);
   }
 
   private onGoal(event: GoalEvent): void {

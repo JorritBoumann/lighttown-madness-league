@@ -85,7 +85,7 @@ export default defineConfig(({ isSsrBuild }) => ({
       output: {
         // Three and Rapier change far less often than the game does, so they
         // get their own chunks and stay in the browser cache across deploys.
-        advancedChunks: {
+        codeSplitting: {
           groups: [
             { name: 'three', test: /node_modules[\\/]three/ },
             { name: 'rapier', test: /node_modules[\\/]@dimforge/ },

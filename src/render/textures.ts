@@ -710,16 +710,18 @@ export function rampTexture(rotated: boolean): THREE.Texture {
 }
 
 export function rampNormalMap(rotated: boolean): THREE.Texture {
-  return normalMapFromHeight(512, 2.2, (ctx, s) => {
-    if (rotated) {
-      ctx.translate(s, 0);
-      ctx.rotate(Math.PI / 2);
-    }
-    drawRamp(ctx, s, (t) => {
-      const v = Math.round(60 + t * 150);
-      return `rgb(${v},${v},${v})`;
-    });
-  });
+  return once(`ramp:${rotated}`, () =>
+    normalMapFromHeight(512, 2.2, (ctx, s) => {
+      if (rotated) {
+        ctx.translate(s, 0);
+        ctx.rotate(Math.PI / 2);
+      }
+      drawRamp(ctx, s, (t) => {
+        const v = Math.round(60 + t * 150);
+        return `rgb(${v},${v},${v})`;
+      });
+    }),
+  );
 }
 
 /**
@@ -735,6 +737,57 @@ export function rampNormalMap(rotated: boolean): THREE.Texture {
  * maps carry vectors rather than colour, so the texture is left in linear
  * space — tagging one as sRGB bends every normal in it.
  */
+/**
+ * The pixel work of normalMapFromHeight: a Sobel filter over the red channel
+ * of `src`, wrapped at the edges so a tiling map has no seam, written as RGBA
+ * normals into `out`.
+ *
+ * Separate so it can be tested without a canvas, and written for speed: it
+ * runs over every pixel of every normal map, which is most of the work of
+ * building the arena. The first version sampled each neighbour through a
+ * function that wrapped both coordinates with modulo and divided by 255 --
+ * eight times a pixel, two million times a map -- and the arena's maps took
+ * 150ms to make. The wrapped rows and columns are worked out once instead,
+ * and the heights scaled once. The output is the same to the byte.
+ */
+export function heightToNormals(
+  src: Uint8ClampedArray,
+  size: number,
+  strength: number,
+  out: Uint8ClampedArray,
+): void {
+  const h = new Float64Array(size * size);
+  for (let i = 0; i < h.length; i++) h[i] = src[i * 4]! / 255;
+  // Wrapped neighbours: index of the previous and next column and row.
+  const prev = new Int32Array(size);
+  const next = new Int32Array(size);
+  for (let i = 0; i < size; i++) {
+    prev[i] = (i - 1 + size) % size;
+    next[i] = (i + 1) % size;
+  }
+  for (let y = 0; y < size; y++) {
+    const up = prev[y]! * size;
+    const row = y * size;
+    const down = next[y]! * size;
+    for (let x = 0; x < size; x++) {
+      const l = prev[x]!;
+      const r = next[x]!;
+      // Sobel, which is less noisy on hand-drawn height than a plain
+      // difference of neighbours.
+      const dx = h[up + r]! + 2 * h[row + r]! + h[down + r]! - (h[up + l]! + 2 * h[row + l]! + h[down + l]!);
+      const dy = h[down + l]! + 2 * h[down + x]! + h[down + r]! - (h[up + l]! + 2 * h[up + x]! + h[up + r]!);
+      const nx = -dx * strength;
+      const ny = -dy * strength;
+      const len = Math.hypot(nx, ny, 1);
+      const i = (row + x) * 4;
+      out[i] = ((nx / len) * 0.5 + 0.5) * 255;
+      out[i + 1] = ((ny / len) * 0.5 + 0.5) * 255;
+      out[i + 2] = ((1 / len) * 0.5 + 0.5) * 255;
+      out[i + 3] = 255;
+    }
+  }
+}
+
 export function normalMapFromHeight(
   size: number,
   strength: number,
@@ -748,35 +801,7 @@ export function normalMapFromHeight(
   const src = heightCtx.getImageData(0, 0, size, size).data;
   const [outEl, outCtx] = canvas(size, size);
   const out = outCtx.createImageData(size, size);
-
-  // Wrapped sampling, so a tiling map has no seam down its edges.
-  const at = (x: number, y: number): number => {
-    const xi = ((x % size) + size) % size;
-    const yi = ((y % size) + size) % size;
-    return src[(yi * size + xi) * 4]! / 255;
-  };
-
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      // Sobel, which is less noisy on hand-drawn height than a plain
-      // difference of neighbours.
-      const dx =
-        at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1) -
-        (at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1));
-      const dy =
-        at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1) -
-        (at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1));
-
-      const nx = -dx * strength;
-      const ny = -dy * strength;
-      const len = Math.hypot(nx, ny, 1);
-      const i = (y * size + x) * 4;
-      out.data[i] = ((nx / len) * 0.5 + 0.5) * 255;
-      out.data[i + 1] = ((ny / len) * 0.5 + 0.5) * 255;
-      out.data[i + 2] = ((1 / len) * 0.5 + 0.5) * 255;
-      out.data[i + 3] = 255;
-    }
-  }
+  heightToNormals(src, size, strength, out.data);
   outCtx.putImageData(out, 0, 0);
 
   const tex = new THREE.CanvasTexture(outEl);
@@ -813,7 +838,9 @@ function hexHeight(ctx: CanvasRenderingContext2D, s: number, cells: number): voi
 
 /** The ball's seams, as a normal map matching its painted panels. */
 export function ballNormalMap(): THREE.Texture {
-  return normalMapFromHeight(512, 6, (ctx, s) => hexHeight(ctx, s, 14));
+  return once('ball', () =>
+    normalMapFromHeight(512, 6, (ctx, s) => hexHeight(ctx, s, 14)),
+  );
 }
 
 /** The ball's roughness: panels polished, seams dull. */
@@ -839,8 +866,37 @@ export function ballRoughnessMap(): THREE.Texture {
  * would do with proper UVs. At the distance the chase camera sits, what reads
  * is that the surface has grain and creases at all.
  */
+/**
+ * Normal maps are painted once and handed out as copies.
+ *
+ * Painting one is the expensive part of building anything here: draw a height
+ * field, read it back, filter every pixel. The arena did it again for every
+ * round that changed the goal size, and once more to change it back -- about
+ * 150ms each time, as a freeze between rounds -- and every car did it for a
+ * texture identical to every other car's. None of these depend on anything
+ * but the arguments.
+ *
+ * A copy, not the same object, because each place that uses one sets its own
+ * repeat. Copies share the picture, so three.js uploads it to the GPU once and
+ * counts the copies, which also makes it safe to dispose any one of them.
+ */
+const painted = new Map<string, THREE.Texture>();
+
+function once(key: string, paint: () => THREE.Texture): THREE.Texture {
+  let base = painted.get(key);
+  if (!base) {
+    base = paint();
+    painted.set(key, base);
+  }
+  return base.clone();
+}
+
 export function carNormalMap(): THREE.Texture {
-  return normalMapFromHeight(512, 3.2, (ctx, s) => {
+  return once('car', paintCarNormalMap);
+}
+
+function paintCarNormalMap(): THREE.Texture {
+  const texture = normalMapFromHeight(512, 3.2, (ctx, s) => {
     // Shallow creases along the body.
     ctx.strokeStyle = '#2a2a2a';
     ctx.lineWidth = s / 160;
@@ -869,6 +925,7 @@ export function carNormalMap(): THREE.Texture {
       ctx.fillRect(Math.abs(x) * s, Math.abs(y) * s, 3, 3);
     }
   });
+  return texture;
 }
 
 /** Fine grain for the pitch, tiled many times over. */
@@ -891,78 +948,82 @@ export function grassNormalMap(): THREE.Texture {
   // from further away. So the tile carries soft undulation, clumping, and
   // blades together, and whichever one the viewing distance can resolve is the
   // one that shows.
-  return normalMapFromHeight(256, 1.8, (ctx, s) => {
-    ctx.fillStyle = '#808080';
-    ctx.fillRect(0, 0, s, s);
+  return once('grass', () =>
+    normalMapFromHeight(256, 1.8, (ctx, s) => {
+      ctx.fillStyle = '#808080';
+      ctx.fillRect(0, 0, s, s);
 
-    // Undulation: the ground itself is not flat.
-    for (let i = 0; i < 26; i++) {
-      const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
-      const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
-      const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
-      const x = r0 * s;
-      const y = r1 * s;
-      const r = s * (0.12 + r2 * 0.22);
-      const blob = ctx.createRadialGradient(x, y, 0, x, y, r);
-      const v = r2 > 0.5 ? 150 : 108;
-      blob.addColorStop(0, `rgba(${v},${v},${v},0.5)`);
-      blob.addColorStop(1, 'rgba(128,128,128,0)');
-      ctx.fillStyle = blob;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+      // Undulation: the ground itself is not flat.
+      for (let i = 0; i < 26; i++) {
+        const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
+        const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
+        const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
+        const x = r0 * s;
+        const y = r1 * s;
+        const r = s * (0.12 + r2 * 0.22);
+        const blob = ctx.createRadialGradient(x, y, 0, x, y, r);
+        const v = r2 > 0.5 ? 150 : 108;
+        blob.addColorStop(0, `rgba(${v},${v},${v},0.5)`);
+        blob.addColorStop(1, 'rgba(128,128,128,0)');
+        ctx.fillStyle = blob;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
-    // Clumps: where the grass grows thicker, at about a car's width.
-    for (let i = 0; i < 150; i++) {
-      const r0 = Math.abs((Math.sin(i * 5.17) * 9731.3) % 1);
-      const r1 = Math.abs((Math.sin(i * 23.9) * 3312.7) % 1);
-      const r2 = Math.abs((Math.sin(i * 61.3) * 5521.9) % 1);
-      const x = r0 * s;
-      const y = r1 * s;
-      const r = s * (0.02 + r2 * 0.045);
-      const clump = ctx.createRadialGradient(x, y, 0, x, y, r);
-      const v = r2 > 0.5 ? 168 : 96;
-      clump.addColorStop(0, `rgba(${v},${v},${v},0.55)`);
-      clump.addColorStop(1, 'rgba(128,128,128,0)');
-      ctx.fillStyle = clump;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+      // Clumps: where the grass grows thicker, at about a car's width.
+      for (let i = 0; i < 150; i++) {
+        const r0 = Math.abs((Math.sin(i * 5.17) * 9731.3) % 1);
+        const r1 = Math.abs((Math.sin(i * 23.9) * 3312.7) % 1);
+        const r2 = Math.abs((Math.sin(i * 61.3) * 5521.9) % 1);
+        const x = r0 * s;
+        const y = r1 * s;
+        const r = s * (0.02 + r2 * 0.045);
+        const clump = ctx.createRadialGradient(x, y, 0, x, y, r);
+        const v = r2 > 0.5 ? 168 : 96;
+        clump.addColorStop(0, `rgba(${v},${v},${v},0.55)`);
+        clump.addColorStop(1, 'rgba(128,128,128,0)');
+        ctx.fillStyle = clump;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
-    // Blades, lying one way. Grass is not isotropic, and that directionality is
-    // most of what reads as grass when the light grazes across it.
-    ctx.lineCap = 'round';
-    for (let i = 0; i < 1800; i++) {
-      const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
-      const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
-      const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
-      const x = r0 * s;
-      const y = r1 * s;
-      const lean = (r2 - 0.5) * 0.8;
-      const len = s * (0.014 + r2 * 0.02);
-      const bright = Math.round(104 + r2 * 76);
-      ctx.strokeStyle = `rgb(${bright},${bright},${bright})`;
-      ctx.lineWidth = s / 260;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + lean * len, y - len);
-      ctx.stroke();
-    }
-  });
+      // Blades, lying one way. Grass is not isotropic, and that directionality is
+      // most of what reads as grass when the light grazes across it.
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 1800; i++) {
+        const r0 = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1);
+        const r1 = Math.abs((Math.sin(i * 78.233) * 1234.5) % 1);
+        const r2 = Math.abs((Math.sin(i * 39.425) * 8765.4) % 1);
+        const x = r0 * s;
+        const y = r1 * s;
+        const lean = (r2 - 0.5) * 0.8;
+        const len = s * (0.014 + r2 * 0.02);
+        const bright = Math.round(104 + r2 * 76);
+        ctx.strokeStyle = `rgb(${bright},${bright},${bright})`;
+        ctx.lineWidth = s / 260;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + lean * len, y - len);
+        ctx.stroke();
+      }
+    }),
+  );
 }
 
 export function floorNormalMap(): THREE.Texture {
-  return normalMapFromHeight(256, 1.4, (ctx, s) => {
-    for (let i = 0; i < 9000; i++) {
-      const x = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
-      const y = Math.abs((Math.sin(i * 39.3468) * 24634.6345) % 1) * s;
-      const v = 128 + (((i * 17) % 9) - 4) * 10;
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      ctx.fillRect(x, y, 2, 2);
-    }
-  });
+  return once('floor', () =>
+    normalMapFromHeight(256, 1.4, (ctx, s) => {
+      for (let i = 0; i < 9000; i++) {
+        const x = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
+        const y = Math.abs((Math.sin(i * 39.3468) * 24634.6345) % 1) * s;
+        const v = 128 + (((i * 17) % 9) - 4) * 10;
+        ctx.fillStyle = `rgb(${v},${v},${v})`;
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }),
+  );
 }
 
 /**
@@ -970,39 +1031,41 @@ export function floorNormalMap(): THREE.Texture {
  * kickplate scratched.
  */
 export function wallNormalMap(): THREE.Texture {
-  return normalMapFromHeight(512, 3.4, (ctx, s) => {
-    const b = wallBands(s);
+  return once('wall', () =>
+    normalMapFromHeight(512, 3.4, (ctx, s) => {
+      const b = wallBands(s);
 
-    // Boards proud of the wall behind them, with the rail proud again above.
-    ctx.fillStyle = '#b4b4b4';
-    ctx.fillRect(0, b.boardTop, s, b.boardH);
-    ctx.fillStyle = '#cfcfcf';
-    ctx.fillRect(0, b.boardTop - b.railH, s, 4);
-    ctx.fillRect(0, b.boardTop - b.railH * 0.45, s, 3);
+      // Boards proud of the wall behind them, with the rail proud again above.
+      ctx.fillStyle = '#b4b4b4';
+      ctx.fillRect(0, b.boardTop, s, b.boardH);
+      ctx.fillStyle = '#cfcfcf';
+      ctx.fillRect(0, b.boardTop - b.railH, s, 4);
+      ctx.fillRect(0, b.boardTop - b.railH * 0.45, s, 3);
 
-    // Stanchions between the panels, at the same rhythm as the albedo — the
-    // two share `wallPanels`, so they cannot drift apart.
-    const post = Math.max(2, s / 290);
-    for (const panel of wallPanels(s)) {
-      ctx.fillStyle = '#5a5a5a';
-      ctx.fillRect(panel.x + panel.w - post / 2, b.boardTop, post, b.boardH);
-    }
+      // Stanchions between the panels, at the same rhythm as the albedo — the
+      // two share `wallPanels`, so they cannot drift apart.
+      const post = Math.max(2, s / 290);
+      for (const panel of wallPanels(s)) {
+        ctx.fillStyle = '#5a5a5a';
+        ctx.fillRect(panel.x + panel.w - post / 2, b.boardTop, post, b.boardH);
+      }
 
-    // Kickplate, recessed, with scratches rather than dents.
-    ctx.fillStyle = '#6a6a6a';
-    ctx.fillRect(0, b.plateTop, s, s - b.plateTop);
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 240; i++) {
-      const sx = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
-      const sy = b.plateTop + Math.abs((Math.sin(i * 78.233) * 1234.5) % 1) * (s - b.plateTop);
-      const len = 5 + ((i * 11) % 26);
-      ctx.strokeStyle = i % 2 ? '#8c8c8c' : '#4a4a4a';
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + len, sy);
-      ctx.stroke();
-    }
-  });
+      // Kickplate, recessed, with scratches rather than dents.
+      ctx.fillStyle = '#6a6a6a';
+      ctx.fillRect(0, b.plateTop, s, s - b.plateTop);
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 240; i++) {
+        const sx = Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * s;
+        const sy = b.plateTop + Math.abs((Math.sin(i * 78.233) * 1234.5) % 1) * (s - b.plateTop);
+        const len = 5 + ((i * 11) % 26);
+        ctx.strokeStyle = i % 2 ? '#8c8c8c' : '#4a4a4a';
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + len, sy);
+        ctx.stroke();
+      }
+    }),
+  );
 }
 
 /**

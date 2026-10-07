@@ -24,6 +24,9 @@ try {
   const game = await Game.create(canvas, ui, url);
   game.start();
   boot?.classList.add('gone');
+  // When the loading screen came down, for measuring load time:
+  // performance.getEntriesByName('lighttown:ready')[0].startTime
+  performance.mark('lighttown:ready');
 
   // Handy for poking at the simulation from the console while tuning.
   (window as unknown as { game: Game }).game = game;

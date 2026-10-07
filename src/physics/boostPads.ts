@@ -18,6 +18,8 @@ export class BoostPads {
   readonly pads: BoostPad[];
   /** Pads picked up since the last drain, for the renderer and sound. */
   readonly justPicked: { pad: BoostPad; car: Car }[] = [];
+  /** Each car's position, read once per update; see update(). */
+  private readonly where: { x: number; y: number; z: number }[] = [];
 
   constructor() {
     this.pads = boostPadLayout().map((p) => ({ x: p.pos.x, z: p.pos.z, big: p.big, cooldown: 0 }));
@@ -26,13 +28,22 @@ export class BoostPads {
   update(dt: number, cars: Car[]): void {
     this.justPicked.length = 0;
     const radius = cfg.boost.padRadius;
+    // Read once per step, not once per pad. A car's position comes out of the
+    // physics engine's WebAssembly as a new object on every read, and asking
+    // for it inside this loop did that for every pad and every car -- 136
+    // times a step for a full pitch, a tenth of the server's step time spent
+    // finding out that nobody was near a pad.
+    const where = this.where;
+    where.length = cars.length;
+    for (let i = 0; i < cars.length; i++) where[i] = cars[i]!.position;
     for (const pad of this.pads) {
       if (pad.cooldown > 0) {
         pad.cooldown = Math.max(0, pad.cooldown - dt);
         continue;
       }
-      for (const car of cars) {
-        const p = car.position;
+      for (let i = 0; i < cars.length; i++) {
+        const car = cars[i]!;
+        const p = where[i]!;
         // Only count pickups near the floor, so flying overhead does not collect.
         if (p.y > cfg.boost.padHeight) continue;
         const dx = p.x - pad.x;

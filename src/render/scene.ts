@@ -27,6 +27,8 @@ export interface Renderer {
   camera: THREE.PerspectiveCamera;
   /** Draws a frame. Goes through the bloom chain when it is on. */
   draw(): void;
+  /** Compiles every shader the scene needs, as draw() will use them. */
+  compile(): Promise<void>;
   /** Feeds the frame time to the adaptive resolution and resizes if it moved. */
   pace(frameMs: number): void;
   /** Current pixel ratio, for the debug readout. */
@@ -175,6 +177,25 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     composer.render();
   }
 
+  /**
+   * Compiles the scene's shaders for the buffer draw() renders the scene into.
+   *
+   * three.js builds a different shader for drawing to the screen (sRGB output,
+   * tone mapping in the shader) than for drawing into a render target (linear,
+   * no tone mapping, which the output pass does after the bloom). Compiling
+   * with nothing bound made the screen's variant of everything, which the game
+   * never uses, and left the real ones to compile on the first frame anyway.
+   */
+  async function compile(): Promise<void> {
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(composer.readBuffer);
+    try {
+      await renderer.compileAsync(scene, camera);
+    } finally {
+      renderer.setRenderTarget(previous);
+    }
+  }
+
   function pace(frameMs: number): void {
     const next = scaler.sample(frameMs);
     if (next === null) return;
@@ -187,6 +208,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     scene,
     camera,
     draw,
+    compile,
     pace,
     resize,
     get pixelRatio() {

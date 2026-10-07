@@ -24,6 +24,28 @@ import {
  * ground is at `-(hy + rideHeight)` and a wheel of radius r sits exactly r above
  * it. Get that wrong and the car either hovers or sinks into the pitch.
  */
+/**
+ * Frees what one createCarMesh made: its geometry, its materials and their
+ * textures. The paint's normal map is a copy of one every car shares, and
+ * three.js counts the copies, so freeing this one leaves the others alone.
+ *
+ * A car taken off the pitch between rounds was only removed from the scene,
+ * so every bot that came and went left a car's worth of buffers on the GPU.
+ */
+export function disposeCarMesh(group: THREE.Object3D): void {
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    mesh.geometry?.dispose();
+    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+    for (const material of materials) {
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) value.dispose();
+      }
+      material.dispose();
+    }
+  });
+}
+
 export function createCarMesh(color = 0x4fc3f7): THREE.Group {
   const h = cfg.car.hitbox;
   const hx = h.length / 2;
